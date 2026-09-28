@@ -56,13 +56,18 @@ export function nativeSessionIds(db: Database): Set<string> {
  * Sessions already imported, read straight off the event log.
  *
  * The deterministic thread id makes this a prefix scan — no bookkeeping table, and it sees
- * imports made by T3 itself as well as by this tool.
+ * imports made by T3 itself as well as by this tool. Deleted threads are excluded so an
+ * undone import can be redone.
  */
 export function importedSessionIds(db: Database): Set<string> {
   const prefix = importedThreadId("");
   const rows = db
     .query<{ stream_id: string }, [string]>(
-      "SELECT DISTINCT stream_id FROM orchestration_events WHERE aggregate_kind = 'thread' AND stream_id GLOB ?",
+      `SELECT DISTINCT stream_id FROM orchestration_events
+        WHERE aggregate_kind = 'thread' AND stream_id GLOB ?
+          AND stream_id NOT IN (
+            SELECT stream_id FROM orchestration_events WHERE event_type = 'thread.deleted'
+          )`,
     )
     .all(`${prefix}*`);
   return new Set(rows.map((r) => r.stream_id.slice(prefix.length)));

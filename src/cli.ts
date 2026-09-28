@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { resolve } from "node:path";
 import { loadConfig, PortError } from "./config.ts";
 import { SessionStore } from "./claude/store.ts";
 import { read } from "./claude/transcript.ts";
@@ -6,19 +7,27 @@ import { open, backup } from "./t3/open.ts";
 import { BASELINE } from "./t3/schema.ts";
 import { importedSessionIds, nativeSessionIds } from "./t3/queries.ts";
 import { plan, apply, type SkipReason } from "./ops/import.ts";
+import { removable, remove } from "./ops/undo.ts";
 
 const USAGE = `t3-port — move conversation history between Claude Code and T3 Code
 
   t3-port doctor                    check this tool against the installed T3 Code
   t3-port list                      Claude sessions, with their status in T3
   t3-port import [ref...] [flags]   import sessions as T3 threads
+  t3-port undo [flags]              delete threads this tool imported
 
-Flags
+Import flags
   --all                  every importable session
   --dry-run              plan only, write nothing
-  --project <path|id>    force the target project
+  --project <path|id>    only sessions that ran under this project
+  --force-project        with --project, redirect every session there regardless of where it ran
   --create-project       create a project when none covers the session
   --force                write even if T3's schema drifted from the baseline
+
+Undo flags
+  --all                  every imported thread
+  --project <path>       only imported threads in this project
+  --dry-run              list them, delete nothing
 `;
 
 interface Args {
@@ -55,6 +64,7 @@ const SKIP_LABEL: Record<SkipReason, string> = {
   "already-imported": "already imported",
   "t3-native": "started by T3",
   "no-project": "no project covers its directory",
+  "other-project": "ran outside the named project",
 };
 
 function doctor(): number {
@@ -118,6 +128,7 @@ async function runImport(args: Args): Promise<number> {
   const { db, compatibility } = open(config, { write: !dryRun, force: Boolean(args.flags.force) });
   const result = plan(db, transcripts, {
     project: typeof args.flags.project === "string" ? args.flags.project : undefined,
+    forceProject: Boolean(args.flags["force-project"]),
     createProject: Boolean(args.flags["create-project"]),
   }, config.worktrees);
 
@@ -148,6 +159,40 @@ async function runImport(args: Args): Promise<number> {
   return 0;
 }
 
+function runUndo(args: Args): number {
+  const config = loadConfig();
+  const dryRun = Boolean(args.flags["dry-run"]);
+  const scope = typeof args.flags.project === "string" ? args.flags.project : undefined;
+  if (!args.flags.all && !scope) {
+    console.error("Pass --all, or --project <path> to narrow it.");
+    return 2;
+  }
+
+  const { db } = open(config, { write: !dryRun, force: Boolean(args.flags.force) });
+  const root = scope ? resolve(scope.replace(/^~/, process.env.HOME ?? "~")) : undefined;
+  const targets = removable(db, root);
+
+  console.log(`${targets.length} imported thread(s)${root ? ` in ${root}` : ""}`);
+  for (const t of targets.slice(0, 15)) {
+    console.log(`  ${(t.sessionId ?? t.threadId).slice(0, 8)}  ${t.title.slice(0, 60)}`);
+  }
+  if (targets.length > 15) console.log(`  ... ${targets.length - 15} more`);
+
+  if (targets.length === 0 || dryRun) {
+    db.close();
+    if (dryRun) console.log(`\nDry run: nothing deleted.`);
+    return 0;
+  }
+
+  const saved = backup(db, config.db);
+  console.log(`\nbackup ${saved}`);
+  const n = remove(db, targets);
+  db.close();
+  console.log(`deleted ${n} thread(s). Restart T3 Code to see them go.`);
+  console.log(`Their sessions become importable again.`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = parse(process.argv.slice(2));
   switch (args.command) {
@@ -157,6 +202,8 @@ async function main(): Promise<number> {
       return await list();
     case "import":
       return await runImport(args);
+    case "undo":
+      return runUndo(args);
     default:
       console.log(USAGE);
       return args.command ? 2 : 0;

@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { resolve as resolvePath, sep } from "node:path";
 import type { SessionStore } from "../claude/store.ts";
 import { FALLBACK_MODEL, hasUserTurn, type Transcript } from "../claude/transcript.ts";
+import { impliedRepoName, repoRootOf } from "../claude/worktree.ts";
 import { nowIso } from "../time.ts";
 import {
   CLAUDE_SESSION_ID,
@@ -19,7 +20,8 @@ export type SkipReason =
   | "unresumable-session-id"
   | "already-imported"
   | "t3-native"
-  | "no-project";
+  | "no-project"
+  | "other-project";
 
 export interface Planned {
   readonly transcript: Transcript;
@@ -32,6 +34,8 @@ export interface Planned {
 export interface Skipped {
   readonly transcript: Transcript;
   readonly reason: SkipReason;
+  /** A project that probably owns this session, when we can only guess. */
+  readonly suggestion?: string;
 }
 
 export interface Plan {
@@ -40,42 +44,88 @@ export interface Plan {
 }
 
 export interface PlanOptions {
-  /** Force a target project by id, title, or workspace root. */
+  /**
+   * Restrict the import to one project, by id, title, or workspace root.
+   *
+   * This filters rather than redirects: a session is imported only when its own working
+   * directory falls under the named project. Redirecting every session into one project is a
+   * separate, explicit choice — see `forceProject`.
+   */
   readonly project?: string;
+  /** Redirect sessions into the named project regardless of where they ran. */
+  readonly forceProject?: boolean;
   readonly createProject?: boolean;
 }
 
 const under = (child: string, parent: string): boolean =>
   child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
 
-/** The most specific project containing a directory. */
-function enclosing(all: readonly Project[], cwd: string): Project | null {
+/** The most specific project directly containing a directory. */
+function directlyEnclosing(all: readonly Project[], cwd: string): Project | null {
   const hits = all.filter((p) => under(cwd, p.workspaceRoot));
   if (hits.length === 0) return null;
   return hits.reduce((best, p) => (p.workspaceRoot.length > best.workspaceRoot.length ? p : best));
+}
+
+/**
+ * The project owning a session's directory, following a worktree back to its repository.
+ *
+ * Only git is trusted here: a live worktree resolves to its real main checkout. A deleted one
+ * can only be guessed from the path shape, which is offered as a suggestion instead.
+ */
+function enclosing(all: readonly Project[], cwd: string): Project | null {
+  const direct = directlyEnclosing(all, cwd);
+  if (direct) return direct;
+  const repoRoot = repoRootOf(cwd);
+  return repoRoot ? directlyEnclosing(all, repoRoot) : null;
+}
+
+/** A project whose directory name matches the repository a dead worktree path implies. */
+function suggestFor(all: readonly Project[], cwd: string | null): string | undefined {
+  if (!cwd) return undefined;
+  const name = impliedRepoName(cwd);
+  if (!name) return undefined;
+  const matches = all.filter((p) => p.workspaceRoot.split(sep).pop() === name);
+  return matches.length === 1 ? matches[0]!.workspaceRoot : undefined;
+}
+
+const expand = (path: string): string => resolvePath(path.replace(/^~/, process.env.HOME ?? "~"));
+
+function named(all: readonly Project[], ref: string): Project | { workspaceRoot: string } {
+  const root = expand(ref);
+  return (
+    all.find((p) => p.id === ref || p.title === ref || p.workspaceRoot === root) ?? { workspaceRoot: root }
+  );
+}
+
+function asNew(workspaceRoot: string): Planned["project"] {
+  return { create: true, workspaceRoot, title: workspaceRoot.split(sep).pop() || workspaceRoot };
 }
 
 function targetProject(
   all: readonly Project[],
   transcript: Transcript,
   options: PlanOptions,
-): Planned["project"] | null {
+): Planned["project"] | "out-of-scope" | null {
   if (options.project) {
-    const root = resolvePath(options.project.replace(/^~/, process.env.HOME ?? "~"));
-    const found = all.find(
-      (p) => p.id === options.project || p.title === options.project || p.workspaceRoot === root,
-    );
-    if (found) return found;
-    return options.createProject
-      ? { create: true, workspaceRoot: root, title: root.split(sep).pop() || root }
-      : null;
+    const target = named(all, options.project);
+
+    // Explicit redirect: every session goes here, wherever it ran.
+    if (options.forceProject) {
+      if ("id" in target) return target;
+      return options.createProject ? asNew(target.workspaceRoot) : null;
+    }
+
+    // Default: a named project scopes the import to sessions that actually ran under it.
+    if (!transcript.cwd || !under(transcript.cwd, target.workspaceRoot)) return "out-of-scope";
+    if ("id" in target) return target;
+    return options.createProject ? asNew(target.workspaceRoot) : null;
   }
+
   if (!transcript.cwd) return null;
   const found = enclosing(all, transcript.cwd);
   if (found) return found;
-  return options.createProject
-    ? { create: true, workspaceRoot: transcript.cwd, title: transcript.cwd.split(sep).pop() || transcript.cwd }
-    : null;
+  return options.createProject ? asNew(transcript.cwd) : null;
 }
 
 function classify(
@@ -116,8 +166,12 @@ export function plan(
       continue;
     }
     const project = targetProject(all, transcript, options);
+    if (project === "out-of-scope") {
+      skipped.push({ transcript, reason: "other-project" });
+      continue;
+    }
     if (!project) {
-      skipped.push({ transcript, reason: "no-project" });
+      skipped.push({ transcript, reason: "no-project", suggestion: suggestFor(all, transcript.cwd) });
       continue;
     }
     const root = "create" in project ? project.workspaceRoot : project.workspaceRoot;
