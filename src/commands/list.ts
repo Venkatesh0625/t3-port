@@ -9,7 +9,6 @@ import { parseSort, sortRows } from "../cli/sort.ts";
 import { PortError } from "../errors.ts";
 import { enclosing } from "../ops/locate.ts";
 import { color } from "../cli/color.ts";
-import { tooLargeNote } from "../cli/report.ts";
 import { shortPath } from "../cli/paths.ts";
 import { open } from "../t3/open.ts";
 import { importedSessionIds, nativeSessionIds, projects } from "../t3/queries.ts";
@@ -29,7 +28,7 @@ export async function list(args: Args): Promise<number> {
   const scope = requireScope(args);
   const { db } = open(config, { write: false });
 
-  const { sessions, skipped } = await collectAll(config, args.providers, {}, scope);
+  const { sessions } = await collectAll(config, args.providers, {}, scope);
   const all = projects(db);
   const known = new Map(
     args.providers.map((p) => [p.id, { native: nativeSessionIds(db, p), imported: importedSessionIds(db, p) }]),
@@ -70,8 +69,6 @@ export async function list(args: Args): Promise<number> {
   // handed back to `import`, which resolves against all of them. Narrowing the input would let
   // a filter print a prefix that is unique on screen and ambiguous everywhere else.
   const id = abbreviate(rows.map((r) => r.session.sessionId));
-  const note = tooLargeNote(skipped);
-  if (note) console.log(note);
   const matching = terms.length > 0 ? ` matching ${terms.map((t) => `"${t}"`).join(" ")}` : "";
   const of = terms.length > 0 ? color.dim(` of ${rows.length}`) : "";
   const countLine =
@@ -82,9 +79,7 @@ export async function list(args: Args): Promise<number> {
     // A header over no rows says nothing; the reason there are none usually does.
     console.log(countLine);
     console.log(
-      skipped.length > 0 && rows.length === 0
-        ? "Every transcript here was past the read limit."
-        : hidden > 0 && found.length === 0
+      hidden > 0 && found.length === 0
           ? `All ${hidden} session(s) here are command records — --include-noise to see them.`
           : terms.length > 0
             ? "Nothing matched."

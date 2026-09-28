@@ -38,6 +38,9 @@ underneath a running T3 are stepped over and never projected — and no restart 
   that checkout, not to whatever contains it.
 - **Don't guess which project a session belongs to.** Git resolves a live worktree; a deleted
   one only ever produces a suggestion the user confirms.
+- **Stream transcripts; never read one whole.** A 38 MB session is 0.25 MB of prose — 0.7%.
+  Reading the file into a string to split it cost two hundred times what the result needed and
+  forced a size limit that skipped exactly the longest conversations.
 - **Prefer the real thing over a plausible one.** Both known data-loss bugs were found by
   running against a copy of real data, not by reasoning about it.
 

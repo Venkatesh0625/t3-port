@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
-import { TooLarge } from "../errors.ts";
 import { isoFromMs, isoOr } from "../time.ts";
-import { deriveTitle, MAX_TRANSCRIPT_BYTES, type Session, type Turn } from "../session.ts";
+import { deriveTitle, type Session, type Turn } from "../session.ts";
+import { records } from "../jsonl.ts";
 
 /**
  * Read a Codex rollout transcript.
@@ -66,7 +66,7 @@ function turnIdOf(payload: Record<string, any>): string | null {
  * Every response-user sharing that turn id is then a duplicate — which is what removes the
  * generated preamble, since Codex injects it into the same turn as the real prompt.
  */
-function duplicateIndices(records: readonly Record_[]): Set<number> {
+async function duplicateIndices(path: string): Promise<Set<number>> {
   const duplicates = new Set<number>();
   let eventTexts = new Set<string>();
   let pending: Array<{ index: number; turnId: string; text: string }> = [];
@@ -78,23 +78,26 @@ function duplicateIndices(records: readonly Record_[]): Set<number> {
     pending = [];
   };
 
-  records.forEach((record, index) => {
+  let index = -1;
+  for await (const raw of records(path)) {
+    index += 1;
+    const record = raw as Record_;
     const payload = record.payload ?? {};
     if (record.type === "response_item" && payload.type === "message" && payload.role === "assistant") {
       finishTurn();
-      return;
+      continue;
     }
     if (record.type === "event_msg" && payload.type === "user_message") {
       const text = String(payload.message ?? "").trim();
       if (text) eventTexts.add(text);
-      return;
+      continue;
     }
     if (record.type === "response_item" && payload.type === "message" && payload.role === "user") {
       const turnId = turnIdOf(payload);
       const text = textOf(payload.content);
       if (turnId && text) pending.push({ index, turnId, text });
     }
-  });
+  }
   finishTurn();
   return duplicates;
 }
@@ -111,28 +114,21 @@ export interface ReadOptions {
 
 export async function read(path: string, options: ReadOptions = {}): Promise<Session> {
   const st = statSync(path);
-  if (st.size > MAX_TRANSCRIPT_BYTES) throw new TooLarge(path, st.size);
   const fallbackTime = isoFromMs(st.mtimeMs);
 
-  const records: Record_[] = [];
-  for (const line of (await Bun.file(path).text()).split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) records.push(parsed);
-    } catch {
-      continue;
-    }
-  }
-
-  const duplicates = duplicateIndices(records);
+  // Two passes over the file rather than one pass over a copy of it in memory: the first finds
+  // which response-item prompts an event proves are duplicates, the second builds the turns.
+  const duplicates = await duplicateIndices(path);
   let sessionId = "";
   let model: string | null = null;
   let cwd: string | null = null;
   const turns: Turn[] = [];
   let generated = 0;
 
-  records.forEach((record, index) => {
+  let index = -1;
+  for await (const raw of records(path)) {
+    index += 1;
+    const record = raw as Record_;
     const payload = record.payload ?? {};
     const at = isoOr(record.timestamp, fallbackTime);
 
@@ -142,16 +138,16 @@ export async function read(path: string, options: ReadOptions = {}): Promise<Ses
       if (!sessionId && id) sessionId = id;
       const root = String(payload.cwd ?? "").trim();
       if (!cwd && root) cwd = root;
-      return;
+      continue;
     }
     if (record.type === "turn_context") {
       const declared = String(payload.model ?? "").trim();
       if (declared) model = declared;
-      return;
+      continue;
     }
     if (record.type === "event_msg" && payload.type === "user_message") {
       const text = String(payload.message ?? "").trim();
-      if (!text) return;
+      if (!text) continue;
       // Drop the response-item copy of this same prompt, back to the last assistant turn.
       for (let i = turns.length - 1; i >= 0; i--) {
         const turn = turns[i]!;
@@ -162,20 +158,20 @@ export async function read(path: string, options: ReadOptions = {}): Promise<Ses
         }
       }
       turns.push({ role: "user", text, createdAt: at });
-      return;
+      continue;
     }
-    if (record.type !== "response_item" || payload.type !== "message") return;
-    if (payload.role !== "user" && payload.role !== "assistant") return;
+    if (record.type !== "response_item" || payload.type !== "message") continue;
+    if (payload.role !== "user" && payload.role !== "assistant") continue;
 
     const text = textOf(payload.content);
-    if (!text) return;
-    if (payload.role === "user" && duplicates.has(index)) return;
+    if (!text) continue;
+    if (payload.role === "user" && duplicates.has(index)) continue;
     if (payload.role === "user" && isGenerated(text)) {
       generated += 1;
-      if (options.dropGenerated) return;
+      if (options.dropGenerated) continue;
     }
     turns.push({ role: payload.role, text, createdAt: at });
-  });
+  }
 
   return {
     provider: "codex",

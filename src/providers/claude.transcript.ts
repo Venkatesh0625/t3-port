@@ -1,11 +1,14 @@
 import { statSync } from "node:fs";
-import { TooLarge } from "../errors.ts";
 import { basename } from "node:path";
 import { isoFromMs, isoOr } from "../time.ts";
-import { deriveTitle, MAX_TRANSCRIPT_BYTES, type Session, type Turn } from "../session.ts";
+import { deriveTitle, type Session, type Turn } from "../session.ts";
+import { records } from "../jsonl.ts";
 
 /**
  * Read a Claude Code transcript.
+ *
+ * The file is streamed: a long session is mostly tool traffic, and holding all of it to keep a
+ * fraction of it is what made large transcripts unreadable.
  *
  * A session file mixes bookkeeping with conversation: `ai-title`, `queue-operation`,
  * `attachment`, `mode`, `cost-state` and others sit alongside `user` and `assistant`. Only the
@@ -43,7 +46,6 @@ function isNoise(record: Record<string, unknown>): boolean {
 
 export async function read(path: string): Promise<Session> {
   const st = statSync(path);
-  if (st.size > MAX_TRANSCRIPT_BYTES) throw new TooLarge(path, st.size);
   const fallbackTime = isoFromMs(st.mtimeMs);
 
   let sessionId = basename(path).replace(/\.jsonl$/, "");
@@ -53,16 +55,7 @@ export async function read(path: string): Promise<Session> {
   let cwd: string | null = null;
   const turns: Turn[] = [];
 
-  for (const line of (await Bun.file(path).text()).split("\n")) {
-    if (!line.trim()) continue;
-    let record: unknown;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      continue; // a torn final line while Claude is writing
-    }
-    if (!record || typeof record !== "object" || Array.isArray(record)) continue;
-    const r = record as Record<string, unknown>;
+  for await (const r of records(path)) {
     if (isNoise(r)) continue;
 
     sessionId = str(r.sessionId) || sessionId;

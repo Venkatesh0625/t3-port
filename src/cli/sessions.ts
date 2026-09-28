@@ -1,5 +1,5 @@
 import type { Config } from "../config.ts";
-import { PortError, TooLarge } from "../errors.ts";
+import { PortError } from "../errors.ts";
 import type { Provider, ReadOptions } from "../providers/index.ts";
 import type { Session } from "../session.ts";
 import { inScope, type Scope } from "../scope.ts";
@@ -20,20 +20,9 @@ export async function collectAll(
   scope?: Scope,
 ): Promise<Collected> {
   const best = new Map<string, Session>();
-  const skipped: TooLarge[] = [];
   for (const provider of providers) {
     for (const path of provider.list(config, scope)) {
-      let session: Session;
-      try {
-        session = await provider.read(config, path, options);
-      } catch (error) {
-        // One unreadable transcript should not cost the user the rest of the listing.
-        if (TooLarge.is(error)) {
-          skipped.push(error);
-          continue;
-        }
-        throw error;
-      }
+      const session = await provider.read(config, path, options);
       // The cheap filter errs towards keeping; this is the decision that counts.
       if (scope && !inScope(session.cwd, scope)) continue;
       const key = `${provider.id}:${session.sessionId}`;
@@ -41,10 +30,7 @@ export async function collectAll(
       if (!existing || session.stat.size > existing.stat.size) best.set(key, session);
     }
   }
-  return {
-    sessions: [...best.values()].sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs),
-    skipped,
-  };
+  return { sessions: [...best.values()].sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs) };
 }
 
 /**
@@ -55,8 +41,6 @@ export async function collectAll(
  */
 export interface Collected {
   readonly sessions: readonly Session[];
-  /** Transcripts too large to read, reported rather than silently dropped. */
-  readonly skipped: readonly TooLarge[];
 }
 
 export async function collectRefs(

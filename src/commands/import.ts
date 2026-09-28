@@ -2,7 +2,6 @@ import { loadConfig } from "../config.ts";
 import { requireScope, type Args } from "../cli/args.ts";
 import { collectAll, collectRefs } from "../cli/sessions.ts";
 import { planSummary } from "../cli/report.ts";
-import { tooLargeNote } from "../cli/report.ts";
 import { apply, plan } from "../ops/import.ts";
 import { backup, open } from "../t3/open.ts";
 
@@ -13,13 +12,10 @@ export async function runImport(args: Args): Promise<number> {
   const dropGenerated = args.flags["drop-generated"] === true;
 
   // No references means every importable session; the filters narrow it from there.
-  const { sessions, skipped } =
+  const { sessions } =
     args.refs.length === 0
       ? await collectAll(config, args.providers, { dropGenerated }, scope)
-      : { sessions: await collectRefs(config, args.providers, args.refs, { dropGenerated }, scope), skipped: [] };
-
-  const note = tooLargeNote(skipped);
-  if (note) console.log(note);
+      : { sessions: await collectRefs(config, args.providers, args.refs, { dropGenerated }, scope) };
 
   const { db, compatibility } = open(config, { write: !dryRun, force: args.flags.force === true });
   const result = plan(
