@@ -16,7 +16,7 @@ export async function runImport(args: Args): Promise<number> {
   const { sessions, skipped } =
     args.refs.length === 0
       ? await collectAll(config, args.providers, { dropGenerated }, scope)
-      : { sessions: await collectRefs(config, args.providers, args.refs, { dropGenerated }), skipped: [] };
+      : { sessions: await collectRefs(config, args.providers, args.refs, { dropGenerated }, scope), skipped: [] };
 
   const note = tooLargeNote(skipped);
   if (note) console.log(note);

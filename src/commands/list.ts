@@ -65,19 +65,36 @@ export async function list(args: Args): Promise<number> {
   const limit = positiveInt(args.flags.limit, "limit", interactive ? TTY_LIMIT : 0);
   const page = limit === 0 ? found.slice(offset) : found.slice(offset, offset + limit);
 
-  const shown = page.length === 0 ? "none" : `${offset + 1}–${offset + page.length}`;
-  const matching = terms.length > 0 ? ` matching ${terms.map((t) => `"${t}"`).join(" ")}` : "";
-  const of = terms.length > 0 ? color.dim(` of ${rows.length}`) : "";
-  console.log(
-    `${color.bold(String(found.length))} session(s)${matching}${of} in ` +
-      `${color.cyan(shortPath(scope.root, 48))}, showing ${shown}\n`,
-  );
+  const shown = `${offset + 1}–${offset + page.length}`;
   // Width comes from every session, not the filtered ones: an id printed here is meant to be
   // handed back to `import`, which resolves against all of them. Narrowing the input would let
   // a filter print a prefix that is unique on screen and ambiguous everywhere else.
   const id = abbreviate(rows.map((r) => r.session.sessionId));
   const note = tooLargeNote(skipped);
   if (note) console.log(note);
+  const matching = terms.length > 0 ? ` matching ${terms.map((t) => `"${t}"`).join(" ")}` : "";
+  const of = terms.length > 0 ? color.dim(` of ${rows.length}`) : "";
+  const countLine =
+    `${color.bold(String(found.length))} session(s)${matching}${of} in ` +
+    `${color.cyan(shortPath(scope.root, 48))}`;
+
+  if (page.length === 0) {
+    // A header over no rows says nothing; the reason there are none usually does.
+    console.log(countLine);
+    console.log(
+      skipped.length > 0 && rows.length === 0
+        ? "Every transcript here was past the read limit."
+        : hidden > 0 && found.length === 0
+          ? `All ${hidden} session(s) here are command records — --include-noise to see them.`
+          : terms.length > 0
+            ? "Nothing matched."
+            : "No sessions ran here.",
+    );
+    return 0;
+  }
+
+  console.log(`${countLine}, showing ${shown}\n`);
+
   // Width comes from the page on show, so a column never pads for rows nobody sees.
   const width = projectWidth(page);
   console.log(sessionHeader(id.width, width));

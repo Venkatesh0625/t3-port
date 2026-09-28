@@ -39,15 +39,15 @@ head2 "list"
 # Distinct session ids, not files: depth 2 only (deeper files are subagent sidechains), and a
 # transcript can sit in two directories when Claude copies a worktree session to the root.
 CLAUDE_N=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' -exec basename {} .jsonl \; | sort -u | wc -l | tr -d ' ')
-CODEX_N=$(runs_in list --codex --include-noise 2>/dev/null | head -1 | cut -d' ' -f1)
+CODEX_N=$(runs_in list --codex --include-noise 2>/dev/null | grep -m1 'session(s) in' | cut -d' ' -f1)
 # Piped output is never truncated, so a count here is the real total.
 check "--path is required"        "$(run list 2>&1 | grep -c 'path <dir> is required')" "1"
-check "a scope narrows the listing" "$([ "$(runs_in list 2>/dev/null | head -1 | cut -d' ' -f1)" -lt "$CLAUDE_N" ] && echo yes)" "yes"
+check "a scope narrows the listing" "$([ "$(runs_in list 2>/dev/null | grep -m1 'session(s) in' | cut -d' ' -f1)" -lt "$CLAUDE_N" ] && echo yes)" "yes"
 check "both providers appear"     "$(runs_in list 2>/dev/null | grep -cE ' (claude|codex) ' | awk '{print ($1>0)?1:0}')" "1"
 check "--limit caps the page"     "$(runs_in list --codex --include-noise --limit 7 2>/dev/null | grep -c ' codex ')" "7"
-check "--offset skips"            "$(runs_in list --codex --include-noise --limit 2 --offset 1 2>/dev/null | head -1 | grep -c 'showing 2')" "1"
+check "--offset skips"            "$(runs_in list --codex --include-noise --limit 2 --offset 1 2>/dev/null | grep -c 'showing 2')" "1"
 check "--limit 0 means all"       "$(runs_in list --codex --include-noise --limit 0 2>/dev/null | grep -c ' codex ')" "$CODEX_N"
-check "noise is hidden by default" "$([ "$(runs_in list --codex 2>/dev/null | head -1 | cut -d' ' -f1)" -lt "$CODEX_N" ] && echo yes)" "yes"
+check "noise is hidden by default" "$([ "$(runs_in list --codex 2>/dev/null | grep -m1 'session(s) in' | cut -d' ' -f1)" -lt "$CODEX_N" ] && echo yes)" "yes"
 check "a bad limit is rejected"   "$(runs_in list --limit abc 2>&1 | grep -c 'whole number')" "1"
 check "piped output has no escape codes" "$(runs_in list --codex --limit 3 2>/dev/null | grep -c "\\[3")" "0"
 check "the project column is shown" "$(runs_in list --codex --limit 3 2>/dev/null | grep -c 'project')" "1"

@@ -64,6 +64,7 @@ export async function collectRefs(
   providers: readonly Provider[],
   refs: readonly string[],
   options: ReadOptions,
+  scope?: Scope,
 ): Promise<Session[]> {
   const sessions: Session[] = [];
   for (const ref of refs) {
@@ -71,7 +72,14 @@ export async function collectRefs(
     const failures: string[] = [];
     for (const provider of providers) {
       try {
-        found = await provider.read(config, provider.resolve(config, ref), options);
+        const session = await provider.read(config, provider.resolve(config, ref), options);
+        // An id is abbreviated against the scope it was printed for, so resolve it there too —
+        // otherwise a listing can print a prefix that is unique on screen and ambiguous here.
+        if (scope && !inScope(session.cwd, scope)) {
+          failures.push(`'${ref}' is not in ${scope.root}`);
+          continue;
+        }
+        found = session;
         break;
       } catch (error) {
         failures.push(error instanceof Error ? error.message : String(error));
