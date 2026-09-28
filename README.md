@@ -29,7 +29,7 @@ Narrow any of it:
 
 ```sh
 t3-port list --path ~/code/web-app      # a checkout and the worktrees made from it
-t3-port prune --path ~/code/web-app     # transcript copies nothing can reach
+t3-port prune --path ~/code/web-app     # transcript copies nothing can reach (--delete to remove)
 t3-port list web-app deploy             # filter by word: agent, id, project, directory, title
 t3-port list --sort project             # group by project
 t3-port import --codex --drop-generated # one provider

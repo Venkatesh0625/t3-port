@@ -27,23 +27,29 @@ export interface Redundant {
   readonly keeping: string;
 }
 
-/** Paths a T3 thread records as the transcript it was imported from. */
-function importedPaths(db: Database): Set<string> {
-  const paths = new Set<string>();
+/**
+ * Directories a T3 thread would resume a session from.
+ *
+ * Not the `filePath` a thread records: that is provenance, noting which copy was read at import
+ * time, and on this machine 102 of 210 of them point at a worktree copy — exactly the copies
+ * worth removing. What resume actually needs is a transcript in the slug of the directory the
+ * thread runs in, so that is what must survive.
+ */
+function resumeDirs(db: Database, config: Config): Set<string> {
+  const dirs = new Set<string>();
   for (const row of db
     .query<{ runtime_payload_json: string | null }, []>(
       "SELECT runtime_payload_json FROM provider_session_runtime WHERE runtime_payload_json IS NOT NULL",
     )
     .all()) {
     try {
-      for (const source of JSON.parse(row.runtime_payload_json ?? "{}").importedTranscripts ?? []) {
-        if (typeof source?.filePath === "string") paths.add(source.filePath);
-      }
+      const cwd = JSON.parse(row.runtime_payload_json ?? "{}").cwd;
+      if (typeof cwd === "string" && cwd) dirs.add(join(config.claudeProjects, slug(cwd)));
     } catch {
       continue;
     }
   }
-  return paths;
+  return dirs;
 }
 
 /**
@@ -75,9 +81,10 @@ export function findRedundant(
   sessions: readonly Session[],
   copiesOf: (sessionId: string) => string[],
   exists: (dir: string) => boolean,
+  sizeOf: (path: string) => number = (path) => statSync(path).size,
 ): Redundant[] {
   const { gone } = reachableDirs(config, sessions, exists);
-  const imported = importedPaths(db);
+  const protectedDirs = resumeDirs(db, config);
   const redundant: Redundant[] = [];
 
   for (const session of sessions) {
@@ -89,18 +96,19 @@ export function findRedundant(
     // home, but for a worktree that directory is usually gone — keeping that copy and removing
     // the one at the project root would delete the only reachable transcript.
     const biggest = (paths: readonly string[]): string =>
-      paths.reduce((big, path) => (statSync(path).size > statSync(big).size ? path : big));
-    const reachable = copies.filter((path) => !gone.has(dirname(path)));
+      paths.reduce((big, path) => (sizeOf(path) > sizeOf(big) ? path : big));
+    const reachable = copies.filter((path) => !gone.has(dirname(path)) || protectedDirs.has(dirname(path)));
     const keeper = reachable.length > 0 ? biggest(reachable) : biggest(copies);
 
     for (const path of copies) {
       if (path === keeper) continue;
       // Only a copy whose directory we can positively place, and whose directory is gone.
       if (!gone.has(dirname(path))) continue;
-      if (imported.has(path)) continue;
+      // A thread resumes from this directory, so its transcript stays whatever else is true.
+      if (protectedDirs.has(dirname(path))) continue;
       redundant.push({
         path,
-        bytes: statSync(path).size,
+        bytes: sizeOf(path),
         sessionId: session.sessionId,
         keeping: keeper,
       });
