@@ -46,7 +46,10 @@ export function projects(db: Database): Project[] {
 export function nativeSessionIds(db: Database, provider: string = CLAUDE_INSTANCE): Set<string> {
   const rows = db
     .query<{ resume_cursor_json: string | null }, [string]>(
-      "SELECT resume_cursor_json FROM provider_session_runtime WHERE provider_name = ?",
+      // An import's binding survives its thread's deletion. Counting those as native would
+      // permanently mark every undone session as "started by T3" and block re-importing it.
+      "SELECT resume_cursor_json FROM provider_session_runtime " +
+        "WHERE provider_name = ? AND thread_id NOT GLOB 'import:*'",
     )
     .all(provider);
   const ids = new Set<string>();
@@ -62,18 +65,18 @@ export function nativeSessionIds(db: Database, provider: string = CLAUDE_INSTANC
  * Sessions already imported, read straight off the event log.
  *
  * The deterministic thread id makes this a prefix scan — no bookkeeping table, and it sees
- * imports made by T3 itself as well as by this tool. Deleted threads are excluded so an
- * undone import can be redone.
+ * imports made by T3 itself as well as by this tool.
+ *
+ * Deleted threads still count. The id is derived from the session, so a re-import would land in
+ * the stream the first one already used, giving one aggregate two creation events. Undo is
+ * therefore final for a session: it frees the conversation, not the id.
  */
 export function importedSessionIds(db: Database, provider: string = CLAUDE_INSTANCE): Set<string> {
   const prefix = importedThreadId("", provider);
   const rows = db
     .query<{ stream_id: string }, [string]>(
-      `SELECT DISTINCT stream_id FROM orchestration_events
-        WHERE aggregate_kind = 'thread' AND stream_id GLOB ?
-          AND stream_id NOT IN (
-            SELECT stream_id FROM orchestration_events WHERE event_type = 'thread.deleted'
-          )`,
+      "SELECT DISTINCT stream_id FROM orchestration_events " +
+        "WHERE aggregate_kind = 'thread' AND stream_id GLOB ?",
     )
     .all(`${prefix}*`);
   return new Set(rows.map((r) => r.stream_id.slice(prefix.length)));

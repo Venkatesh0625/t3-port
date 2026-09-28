@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# End-to-end test against a throwaway copy of the live state. Writes nothing outside $SB.
+set -uo pipefail
+
+SB=/tmp/t3-port-e2e
+CLI="bun run $(cd "$(dirname "$0")" && pwd)/src/cli.ts"
+PASS=0; FAIL=0
+
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=$((FAIL+1)); }
+check(){ if [ "$2" = "$3" ]; then ok "$1 ($2)"; else bad "$1 — expected $3, got $2"; fi; }
+head2(){ printf '\n\033[1m%s\033[0m\n' "$1"; }
+q()    { sqlite3 -readonly "$SB/t3/userdata/state.sqlite" "$1" 2>/dev/null; }
+
+run() { env T3CODE_HOME="$SB/t3" CLAUDE_CONFIG_DIR="$SB/claude" CODEX_HOME="$SB/codex" $CLI "$@"; }
+
+head2 "Building sandbox from live state"
+rm -rf "$SB"; mkdir -p "$SB/t3/userdata" "$SB/claude" "$SB/codex"
+# Start from a state with no import history, so counts mean what they say.
+BASE=$(ls -t ~/.t3/userdata/state.sqlite.t3-port-*.bak 2>/dev/null | tail -1)
+BASE=${BASE:-~/.t3/userdata/state.sqlite}
+sqlite3 -readonly "$BASE" "VACUUM INTO '$SB/t3/userdata/state.sqlite'"
+echo "  base: $(basename "$BASE")"
+# Transcripts are copied, not linked: import may write into the Claude home.
+cp -R ~/.claude/projects "$SB/claude/projects"
+cp -R ~/.codex/sessions  "$SB/codex/sessions"
+echo "  db $(q 'select count(*) from projection_threads where deleted_at is null') live threads,"\
+     "$(find "$SB/claude/projects" -name '*.jsonl' | wc -l | tr -d ' ') claude,"\
+     "$(find "$SB/codex/sessions" -name '*.jsonl' | wc -l | tr -d ' ') codex transcripts"
+
+head2 "doctor"
+run doctor >/dev/null 2>&1; check "exits 0 on a matching schema" "$?" "0"
+
+head2 "list"
+check "both providers"   "$(run list 2>/dev/null | grep -cE '^(t3|imported|-) ')" "40"
+check "claude only"      "$(run list --claude 2>/dev/null | grep -c 'claude ')" "40"
+check "codex only"       "$(run list --codex  2>/dev/null | grep -c 'codex ')"  "40"
+
+head2 "import --dry-run writes nothing"
+BEFORE=$(q "select count(*) from orchestration_events")
+run import --all --dry-run >/dev/null 2>&1
+check "event count unchanged" "$(q 'select count(*) from orchestration_events')" "$BEFORE"
+
+head2 "import (claude)"
+run import --all --claude >/dev/null 2>&1
+CL=$(q "select count(*) from provider_session_runtime where thread_id glob 'import:claudeAgent:*'")
+[ "$CL" -gt 0 ] && ok "imported $CL claude thread(s)" || bad "imported no claude threads"
+check "cursors carry a resume key" \
+  "$(q "select count(*) from provider_session_runtime where thread_id glob 'import:claudeAgent:*' and json_extract(resume_cursor_json,'\$.resume') is null")" "0"
+
+head2 "import (codex)"
+run import --all --codex --drop-generated >/dev/null 2>&1
+CX=$(q "select count(*) from provider_session_runtime where thread_id glob 'import:codex:*'")
+[ "$CX" -gt 0 ] && ok "imported $CX codex thread(s)" || bad "imported no codex threads"
+check "cursors have NO resume key" \
+  "$(q "select count(*) from provider_session_runtime where thread_id glob 'import:codex:*' and json_extract(resume_cursor_json,'\$.resume') is not null")" "0"
+check "cursor threadId is the session id" \
+  "$(q "select count(*) from provider_session_runtime where thread_id glob 'import:codex:*' and json_extract(resume_cursor_json,'\$.threadId') <> replace(thread_id,'import:codex:','')")" "0"
+
+head2 "event log integrity"
+check "no stream_version gaps or dupes" \
+  "$(q "select count(*) from (select stream_id, min(stream_version) mn, max(stream_version) mx, count(*) n, count(distinct stream_version) d from orchestration_events where stream_id glob 'import:*' group by stream_id) where mn<>0 or mx<>n-1 or d<>n")" "0"
+check "every event has a receipt" \
+  "$(q "select count(*) from orchestration_events e where e.stream_id glob 'import:*' and not exists (select 1 from orchestration_command_receipts r where r.command_id=e.command_id)")" "0"
+check "every thread has a settled event" \
+  "$(q "select count(*) from (select stream_id from orchestration_events where stream_id glob 'import:*' group by stream_id having sum(event_type='thread.settled')<>1)")" "0"
+check "no stream created twice" \
+  "$(q "select count(*) from (select stream_id from orchestration_events where event_type='thread.created' and stream_id glob 'import:*' group by stream_id having count(*)>1)")" "0"
+check "roles are only user/assistant" \
+  "$(q "select count(*) from orchestration_events where stream_id glob 'import:*' and event_type='thread.message-sent' and json_extract(payload_json,'\$.role') not in ('user','assistant')")" "0"
+
+head2 "idempotency"
+check "re-import plans nothing" "$(run import --all --drop-generated --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "0"
+
+head2 "undo"
+DEL0=$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")
+run undo --all --dry-run >/dev/null 2>&1
+check "dry-run deletes nothing" \
+  "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$DEL0"
+run undo --all >/dev/null 2>&1
+TOTAL=$((DEL0+CL+CX))
+check "one thread.deleted per imported thread" \
+  "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$TOTAL"
+run undo --all >/dev/null 2>&1
+check "a second undo adds nothing" \
+  "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$TOTAL"
+
+head2 "guards"
+cp ~/.t3/userdata/server-runtime.json "$SB/t3/userdata/" 2>/dev/null
+run import --all >/dev/null 2>&1; check "refuses while T3 runs" "$?" "1"
+rm -f "$SB/t3/userdata/server-runtime.json"
+sqlite3 "$SB/t3/userdata/state.sqlite" "ALTER TABLE projection_thread_messages ADD COLUMN drift_probe TEXT;" 2>/dev/null
+run doctor >/dev/null 2>&1;            check "doctor flags schema drift" "$?" "1"
+run import --all >/dev/null 2>&1;      check "import refuses on drift"   "$?" "1"
+run import --all --force --dry-run >/dev/null 2>&1; check "--force overrides" "$?" "0"
+
+head2 "undo is final"
+check "an undone session is not offered again" "$(run import --all --drop-generated --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "0"
+
+printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ] && echo "sandbox: $SB (delete when done)" 
+exit $((FAIL > 0))

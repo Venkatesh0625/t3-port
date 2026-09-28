@@ -153,3 +153,23 @@ thread; re-running reports 0 to import.
 
 Implemented: `doctor`, `list`, `import`. Export (T3 threads → `claude --resume`) and sync are not
 built yet.
+
+## Testing
+
+```sh
+bun test      # unit tests for the id conventions, command shapes and provider rules
+./e2e.sh      # end-to-end against a throwaway copy of the live state
+```
+
+`e2e.sh` builds a sandbox from the most recent pre-import backup plus copies of both provider
+homes, then exercises every command for both providers and asserts on the resulting event log:
+cursor shapes per provider, no `stream_version` gaps, a receipt per event, one settled event per
+thread, no stream created twice, idempotent re-import, undo finality, and each guard. It writes
+nothing outside `/tmp/t3-port-e2e`.
+
+## Undo is final for a session
+
+A thread id is derived from the session id, so a session owns one event stream forever.
+Re-importing after an undo would append a second creation to that stream, leaving an aggregate
+T3 cannot fold into one thread. `undo` therefore frees the conversation, not the id: the session
+stays marked as imported. To genuinely start over, restore a backup from before the import.

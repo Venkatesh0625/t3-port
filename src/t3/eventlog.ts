@@ -34,8 +34,25 @@ export class EventLog {
     return row?.next ?? 0;
   }
 
+  /** Whether any event has ever been written for this aggregate. */
+  exists(aggregateKind: string, streamId: string): boolean {
+    const row = this.db
+      .query<{ n: number }, [string, string]>(
+        "SELECT COUNT(*) AS n FROM orchestration_events WHERE aggregate_kind = ? AND stream_id = ?",
+      )
+      .get(aggregateKind, streamId);
+    return (row?.n ?? 0) > 0;
+  }
+
   append(command: Command): void {
     if (command.events.length === 0) return;
+    // An aggregate is created once. Appending a second creation — which a re-import into a
+    // deterministic thread id would do — leaves a stream T3 cannot fold into one thread.
+    if (command.events[0]!.type.endsWith(".created") && this.exists(command.aggregateKind, command.streamId)) {
+      throw new Error(
+        `Refusing to recreate ${command.aggregateKind} '${command.streamId}': its stream already has events.`,
+      );
+    }
     const commandId = randomUUID();
     let version = this.nextVersion(command.aggregateKind, command.streamId);
     let lastSequence = 0;

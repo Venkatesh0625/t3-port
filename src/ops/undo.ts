@@ -17,39 +17,60 @@ export interface Removable {
   readonly sessionId: string | null;
 }
 
-/** Imported threads that are still live, optionally narrowed to one project root. */
+/**
+ * Imported threads that are still live, optionally narrowed to one project root.
+ *
+ * Read from the event log rather than the projections. Projections only advance when T3 starts,
+ * so a thread imported since its last run is invisible there — undo would report nothing to do
+ * immediately after an import, and a second undo before a restart would re-delete what the
+ * first already handled. The log is current by construction.
+ */
 export function removable(db: Database, workspaceRoot?: string): Removable[] {
   const rows = db
     .query<
-      { thread_id: string; title: string; workspace_root: string; resume_cursor_json: string | null },
+      { stream_id: string; payload_json: string; workspace_root: string | null; resume_cursor_json: string | null },
       []
     >(
-      `SELECT t.thread_id, t.title, p.workspace_root, r.resume_cursor_json
-         FROM projection_threads t
-         JOIN projection_projects p ON p.project_id = t.project_id
-         LEFT JOIN provider_session_runtime r ON r.thread_id = t.thread_id
-        WHERE t.thread_id GLOB 'import:*' AND t.deleted_at IS NULL
-        ORDER BY t.updated_at DESC`,
+      `SELECT e.stream_id, e.payload_json, p.workspace_root, r.resume_cursor_json
+         FROM orchestration_events e
+         LEFT JOIN projection_projects p
+           ON p.project_id = json_extract(e.payload_json, '$.projectId')
+         LEFT JOIN provider_session_runtime r ON r.thread_id = e.stream_id
+        WHERE e.aggregate_kind = 'thread'
+          AND e.event_type = 'thread.created'
+          AND e.stream_id GLOB 'import:*'
+          AND e.stream_id NOT IN (
+            SELECT stream_id FROM orchestration_events WHERE event_type = 'thread.deleted'
+          )
+        ORDER BY e.sequence DESC`,
     )
     .all();
 
   return rows
-    .filter((r) => workspaceRoot === undefined || r.workspace_root === workspaceRoot)
     .map((r) => {
+      let title = r.stream_id;
+      try {
+        const payload = JSON.parse(r.payload_json);
+        if (typeof payload.title === "string") title = payload.title;
+      } catch {
+        // a thread we cannot read a title for still deletes fine
+      }
       let sessionId: string | null = null;
       try {
-        const resume = JSON.parse(r.resume_cursor_json ?? "{}").resume;
-        if (typeof resume === "string") sessionId = resume;
+        const cursor = JSON.parse(r.resume_cursor_json ?? "{}");
+        const id = r.stream_id.startsWith("import:codex:") ? cursor.threadId : cursor.resume;
+        if (typeof id === "string") sessionId = id;
       } catch {
-        // a binding we cannot read still deletes fine
+        // likewise
       }
       return {
-        threadId: r.thread_id,
-        title: r.title,
-        workspaceRoot: r.workspace_root,
+        threadId: r.stream_id,
+        title,
+        workspaceRoot: r.workspace_root ?? "",
         sessionId,
       };
-    });
+    })
+    .filter((t) => workspaceRoot === undefined || t.workspaceRoot === workspaceRoot);
 }
 
 export function remove(db: Database, threads: readonly Removable[], now = nowIso()): number {
