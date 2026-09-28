@@ -1,12 +1,16 @@
 import type { Database } from "bun:sqlite";
 import { resolve as resolvePath, sep } from "node:path";
 import type { SessionStore } from "../claude/store.ts";
-import { FALLBACK_MODEL, hasUserTurn, type Transcript } from "../claude/transcript.ts";
+import { FALLBACK_MODEL as CLAUDE_MODEL } from "../claude/transcript.ts";
+import { FALLBACK_MODEL as CODEX_MODEL } from "../codex/rollout.ts";
+import { hasUserTurn, type Session } from "../session.ts";
 import { impliedRepoName, repoRootOf } from "../claude/worktree.ts";
 import { nowIso } from "../time.ts";
 import {
+  CLAUDE_INSTANCE,
   CLAUDE_SESSION_ID,
-  bindClaudeSession,
+  CODEX_INSTANCE,
+  bindSession,
   importedThreadId,
   projectCreate,
   threadCreate,
@@ -24,7 +28,7 @@ export type SkipReason =
   | "other-project";
 
 export interface Planned {
-  readonly transcript: Transcript;
+  readonly session: Session;
   readonly project: Project | { create: true; workspaceRoot: string; title: string };
   readonly threadId: string;
   /** True when the transcript must be copied so `claude --resume` finds it at the project root. */
@@ -32,7 +36,7 @@ export interface Planned {
 }
 
 export interface Skipped {
-  readonly transcript: Transcript;
+  readonly session: Session;
   readonly reason: SkipReason;
   /** A project that probably owns this session, when we can only guess. */
   readonly suggestion?: string;
@@ -104,7 +108,7 @@ function asNew(workspaceRoot: string): Planned["project"] {
 
 function targetProject(
   all: readonly Project[],
-  transcript: Transcript,
+  session: Session,
   options: PlanOptions,
 ): Planned["project"] | "out-of-scope" | null {
   if (options.project) {
@@ -117,69 +121,81 @@ function targetProject(
     }
 
     // Default: a named project scopes the import to sessions that actually ran under it.
-    if (!transcript.cwd || !under(transcript.cwd, target.workspaceRoot)) return "out-of-scope";
+    if (!session.cwd || !under(session.cwd, target.workspaceRoot)) return "out-of-scope";
     if ("id" in target) return target;
     return options.createProject ? asNew(target.workspaceRoot) : null;
   }
 
-  if (!transcript.cwd) return null;
-  const found = enclosing(all, transcript.cwd);
+  if (!session.cwd) return null;
+  const found = enclosing(all, session.cwd);
   if (found) return found;
-  return options.createProject ? asNew(transcript.cwd) : null;
+  return options.createProject ? asNew(session.cwd) : null;
 }
 
-function classify(
-  transcript: Transcript,
-  native: ReadonlySet<string>,
-  imported: ReadonlySet<string>,
-  worktrees: string,
-): SkipReason | null {
+interface Known {
+  readonly native: ReadonlySet<string>;
+  readonly imported: ReadonlySet<string>;
+}
+
+function classify(session: Session, known: Known, worktrees: string): SkipReason | null {
   // T3 refuses to resume a session id it cannot parse, so importing one would strand the thread.
-  if (!CLAUDE_SESSION_ID.test(transcript.sessionId)) return "unresumable-session-id";
-  if (!hasUserTurn(transcript)) return "no-user-turn";
-  if (imported.has(transcript.sessionId)) return "already-imported";
-  if (native.has(transcript.sessionId)) return "t3-native";
-  if (transcript.cwd && under(transcript.cwd, worktrees)) return "t3-native";
+  if (!session.sessionId) return "unresumable-session-id";
+  // T3 refuses Claude ids it cannot parse; Codex ids come from metadata and are taken as given.
+  if (session.provider === CLAUDE_INSTANCE && !CLAUDE_SESSION_ID.test(session.sessionId)) {
+    return "unresumable-session-id";
+  }
+  if (!hasUserTurn(session)) return "no-user-turn";
+  if (known.imported.has(session.sessionId)) return "already-imported";
+  if (known.native.has(session.sessionId)) return "t3-native";
+  if (session.cwd && under(session.cwd, worktrees)) return "t3-native";
   return null;
 }
 
 export function plan(
   db: Database,
-  transcripts: readonly Transcript[],
+  sessions: readonly Session[],
   options: PlanOptions,
   worktrees: string,
 ): Plan {
   const all = projects(db);
-  const native = nativeSessionIds(db);
-  const imported = importedSessionIds(db);
+  // Each provider has its own id space and its own cursor shape, so look them up separately.
+  const cache = new Map<string, Known>();
+  const known = (provider: string): Known => {
+    let entry = cache.get(provider);
+    if (!entry) {
+      entry = { native: nativeSessionIds(db, provider), imported: importedSessionIds(db, provider) };
+      cache.set(provider, entry);
+    }
+    return entry;
+  };
   const planned: Planned[] = [];
   const skipped: Skipped[] = [];
   const seen = new Set<string>();
 
-  for (const transcript of transcripts) {
-    if (seen.has(transcript.sessionId)) continue;
-    seen.add(transcript.sessionId);
+  for (const session of sessions) {
+    if (seen.has(session.sessionId)) continue;
+    seen.add(session.sessionId);
 
-    const reason = classify(transcript, native, imported, worktrees);
+    const reason = classify(session, known(session.provider), worktrees);
     if (reason) {
-      skipped.push({ transcript, reason });
+      skipped.push({ session, reason });
       continue;
     }
-    const project = targetProject(all, transcript, options);
+    const project = targetProject(all, session, options);
     if (project === "out-of-scope") {
-      skipped.push({ transcript, reason: "other-project" });
+      skipped.push({ session, reason: "other-project" });
       continue;
     }
     if (!project) {
-      skipped.push({ transcript, reason: "no-project", suggestion: suggestFor(all, transcript.cwd) });
+      skipped.push({ session, reason: "no-project", suggestion: suggestFor(all, session.cwd) });
       continue;
     }
     const root = "create" in project ? project.workspaceRoot : project.workspaceRoot;
     planned.push({
-      transcript,
+      session,
       project,
-      threadId: importedThreadId(transcript.sessionId),
-      needsCopy: transcript.cwd !== root,
+      threadId: importedThreadId(session.sessionId, session.provider),
+      needsCopy: session.provider === CLAUDE_INSTANCE && session.cwd !== root,
     });
   }
   return { planned, skipped };
@@ -226,39 +242,45 @@ export function apply(db: Database, store: SessionStore, plan: Plan, now = nowIs
         project = item.project;
       }
 
-      const { transcript, threadId } = item;
-      const copiedTo = item.needsCopy ? store.copyUnder(transcript.path, project.workspaceRoot) : null;
+      const { session, threadId } = item;
+      // Only Claude finds a transcript by directory; Codex rollouts are addressed by id.
+      const copiedTo =
+        item.needsCopy && session.provider === CLAUDE_INSTANCE
+          ? store.copyUnder(session.path, project.workspaceRoot)
+          : null;
 
-      bindClaudeSession(db, {
+      bindSession(db, {
+        provider: session.provider,
         threadId,
-        sessionId: transcript.sessionId,
+        sessionId: session.sessionId,
         cwd: project.workspaceRoot,
         source: {
-          filePath: transcript.path,
-          size: transcript.stat.size,
-          mtimeMs: transcript.stat.mtimeMs,
-          device: transcript.stat.dev,
-          inode: transcript.stat.ino,
+          filePath: session.path,
+          size: session.stat.size,
+          mtimeMs: session.stat.mtimeMs,
+          device: session.stat.dev,
+          inode: session.stat.ino,
         },
         now,
       });
 
-      const openedAt = transcript.turns[0]!.createdAt;
+      const openedAt = session.turns[0]!.createdAt;
       log.append(
         threadCreate({
           threadId,
           projectId: project.id,
-          title: transcript.title,
-          model: transcript.model ?? FALLBACK_MODEL,
+          title: session.title,
+          model: session.model ?? (session.provider === CODEX_INSTANCE ? CODEX_MODEL : CLAUDE_MODEL),
+          instance: session.provider,
           createdAt: openedAt,
         }),
       );
-      log.append(threadHistoryImport(threadId, transcript.turns));
+      log.append(threadHistoryImport(threadId, session.turns));
 
       results.push({
         threadId,
-        title: transcript.title,
-        turns: transcript.turns.length,
+        title: session.title,
+        turns: session.turns.length,
         workspaceRoot: project.workspaceRoot,
         copiedTo,
       });

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { importedThreadId, CLAUDE_INSTANCE } from "./commands.ts";
+import { importedThreadId, CLAUDE_INSTANCE, CODEX_INSTANCE } from "./commands.ts";
 
 export interface Project {
   readonly id: string;
@@ -37,17 +37,23 @@ export function projects(db: Database): Project[] {
     .map((r) => ({ id: r.project_id, title: r.title, workspaceRoot: r.workspace_root }));
 }
 
-/** Claude sessions T3 started itself — never re-import one of these. */
-export function nativeSessionIds(db: Database): Set<string> {
+/**
+ * Sessions T3 started itself — never re-import one of these.
+ *
+ * The cursor shape is provider-specific: Claude stores the session under `resume`, Codex stores
+ * it as the cursor's own `threadId`.
+ */
+export function nativeSessionIds(db: Database, provider: string = CLAUDE_INSTANCE): Set<string> {
   const rows = db
     .query<{ resume_cursor_json: string | null }, [string]>(
       "SELECT resume_cursor_json FROM provider_session_runtime WHERE provider_name = ?",
     )
-    .all(CLAUDE_INSTANCE);
+    .all(provider);
   const ids = new Set<string>();
   for (const row of rows) {
-    const resume = asObject(row.resume_cursor_json).resume;
-    if (typeof resume === "string") ids.add(resume);
+    const cursor = asObject(row.resume_cursor_json);
+    const id = provider === CODEX_INSTANCE ? cursor.threadId : cursor.resume;
+    if (typeof id === "string") ids.add(id);
   }
   return ids;
 }
@@ -59,8 +65,8 @@ export function nativeSessionIds(db: Database): Set<string> {
  * imports made by T3 itself as well as by this tool. Deleted threads are excluded so an
  * undone import can be redone.
  */
-export function importedSessionIds(db: Database): Set<string> {
-  const prefix = importedThreadId("");
+export function importedSessionIds(db: Database, provider: string = CLAUDE_INSTANCE): Set<string> {
+  const prefix = importedThreadId("", provider);
   const rows = db
     .query<{ stream_id: string }, [string]>(
       `SELECT DISTINCT stream_id FROM orchestration_events

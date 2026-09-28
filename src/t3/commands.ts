@@ -12,6 +12,7 @@ import type { Command, PlannedEvent } from "./eventlog.ts";
  */
 
 export const CLAUDE_INSTANCE = "claudeAgent";
+export const CODEX_INSTANCE = "codex";
 
 /** Sessions T3 refuses to resume are not worth importing. (AgentSessionImporter.ts:32) */
 export const CLAUDE_SESSION_ID =
@@ -22,6 +23,18 @@ const HISTORY_IMPORT = { historyImport: true } as const;
 /** `import:<providerInstanceId>:<providerSessionId>` (AgentSessionImporter.ts:168). */
 export function importedThreadId(sessionId: string, instance = CLAUDE_INSTANCE): string {
   return `import:${instance}:${sessionId}`;
+}
+
+/**
+ * The two providers' resume cursors are not the same shape.
+ *
+ * Claude resumes by session id passed to the Agent SDK, so the cursor carries both the T3
+ * thread and the session. Codex resumes by its own thread id, and T3 stores only that
+ * (AgentSessionImporter.ts:234). Writing Claude's shape for a Codex thread would leave the
+ * session unresumable.
+ */
+export function resumeCursor(provider: string, threadId: string, sessionId: string): unknown {
+  return provider === CODEX_INSTANCE ? { threadId: sessionId } : { threadId, resume: sessionId };
 }
 
 /** `<threadId>:<index padded to 6>` (AgentSessionImporter.ts:267). */
@@ -154,9 +167,10 @@ export interface TranscriptSource {
  * Inserted with ON CONFLICT DO NOTHING so a live binding is never displaced
  * (AgentSessionImporter.ts:225 makes the same choice).
  */
-export function bindClaudeSession(
+export function bindSession(
   db: Database,
   input: {
+    provider: string;
     threadId: string;
     sessionId: string;
     cwd: string;
@@ -172,17 +186,17 @@ export function bindClaudeSession(
      ON CONFLICT (thread_id) DO NOTHING`,
     [
       input.threadId,
-      CLAUDE_INSTANCE,
-      CLAUDE_INSTANCE,
-      CLAUDE_INSTANCE,
+      input.provider,
+      input.provider,
+      input.provider,
       input.now,
-      JSON.stringify({ threadId: input.threadId, resume: input.sessionId }),
+      JSON.stringify(resumeCursor(input.provider, input.threadId, input.sessionId)),
       JSON.stringify({
         cwd: input.cwd,
         importedTranscripts: [
           {
-            provider: CLAUDE_INSTANCE,
-            providerInstanceId: CLAUDE_INSTANCE,
+            provider: input.provider,
+            providerInstanceId: input.provider,
             providerSessionId: input.sessionId,
             filePath: input.source.filePath,
             size: input.source.size,

@@ -1,7 +1,7 @@
 # t3-port
 
-Import Claude Code sessions into [T3 Code](https://github.com/pingdotgg/t3code) as threads that
-resume the same Claude session. Bun + TypeScript, no dependencies.
+Import Claude Code and Codex sessions into [T3 Code](https://github.com/pingdotgg/t3code) as
+threads that resume the original provider session. Bun + TypeScript, no dependencies.
 
 ## Install
 
@@ -33,6 +33,7 @@ t3-port list                   # Claude sessions, marked t3 / imported / -
 t3-port import --all --dry-run # plan, write nothing
 t3-port import --all           # write (quit T3 Code first)
 
+t3-port import --codex --all   # one provider only (--claude likewise)
 t3-port import 347cd91a                          # one session, by id prefix
 t3-port import --all --project ~/personal/app    # force the target project
 t3-port import --all --create-project            # create projects as needed
@@ -49,6 +50,7 @@ t3-port doctor && t3-port import --all
 | Variable | Default |
 | --- | --- |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` |
+| `CODEX_HOME` | `~/.codex` |
 | `T3CODE_HOME` | `~/.t3` |
 
 Point `T3CODE_HOME` at a copy of `~/.t3` to rehearse an import against a throwaway database.
@@ -87,6 +89,33 @@ Command shapes come from T3's own source, not from guessing:
 | `thread.history.import` → message-sent + settled | `apps/server/src/orchestration/decider.ts:2003-2073` |
 | `attachments` / `context` optional on messages | `packages/contracts/src/orchestration.ts:1912` |
 | Session ids T3 can resume | `apps/server/src/project/AgentSessionImporter.ts:32` |
+
+## Codex
+
+Codex differs from Claude in every way that matters, so the reader is separate:
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| Location | `~/.claude/projects/<slugged cwd>/` | `~/.codex/sessions/<y>/<m>/<d>/` |
+| Session id | the filename | only inside `session_meta` |
+| Working directory | the directory name | only inside `session_meta` |
+| Turns | `user` / `assistant` records | `response_item` with `input_text` / `output_text` |
+| Resume cursor | `{threadId, resume: <session>}` | `{threadId: <session>}` |
+
+That last row is the one that silently breaks things: writing Claude's cursor shape for a Codex
+thread leaves the session unresumable.
+
+### Generated preamble
+
+Codex injects its own text as user turns — the AGENTS.md header, `<environment_context>`,
+`<turn_aborted>`. T3 removes these only when an `event_msg` copy of the real prompt proves which
+text in a turn the user actually submitted, and keeps everything otherwise rather than risk
+deleting real user text. This reproduces that rule exactly.
+
+In practice that rule rarely fires: across 78 local rollouts only 1 contained any `event_msg`
+user message, so 43 of 73 sessions would be titled `# AGENTS.md instructions for ...`. Pass
+`--drop-generated` to filter the known preambles instead. It stays opt-in, and the plan reports
+how many turns it would affect.
 
 ## What it does not import
 

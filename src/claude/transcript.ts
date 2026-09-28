@@ -1,9 +1,10 @@
 import { statSync } from "node:fs";
 import { basename } from "node:path";
 import { isoFromMs, isoOr } from "../time.ts";
+import { deriveTitle, type Session, type Turn } from "../session.ts";
 
 /**
- * Claude Code transcripts are JSONL, one record per line, appended as a session runs.
+ * Read a Claude Code transcript.
  *
  * A session file mixes bookkeeping with conversation: `ai-title`, `queue-operation`,
  * `attachment`, `mode`, `cost-state` and others sit alongside `user` and `assistant`. Only the
@@ -15,24 +16,6 @@ import { isoFromMs, isoOr } from "../time.ts";
 export const FALLBACK_MODEL = "claude-opus-5-5";
 
 const PROSE_BLOCKS = new Set(["text", "input_text", "output_text"]);
-
-export interface Turn {
-  readonly role: "user" | "assistant";
-  readonly text: string;
-  readonly createdAt: string;
-}
-
-export interface Transcript {
-  readonly path: string;
-  readonly sessionId: string;
-  readonly title: string;
-  readonly model: string | null;
-  readonly cwd: string | null;
-  readonly branch: string | null;
-  readonly turns: readonly Turn[];
-  readonly updatedAt: string;
-  readonly stat: { size: number; mtimeMs: number; dev: number; ino: number };
-}
 
 /** Prose out of a message body, which is either a bare string or a block list. */
 export function prose(content: unknown): string {
@@ -57,7 +40,7 @@ function isNoise(record: Record<string, unknown>): boolean {
   return Boolean(record.isSidechain || record.isMeta || record.isCompactSummary);
 }
 
-export async function read(path: string): Promise<Transcript> {
+export async function read(path: string): Promise<Session> {
   const st = statSync(path);
   const fallbackTime = isoFromMs(st.mtimeMs);
 
@@ -66,7 +49,6 @@ export async function read(path: string): Promise<Transcript> {
   let customTitle = "";
   let model: string | null = null;
   let cwd: string | null = null;
-  let branch: string | null = null;
   const turns: Turn[] = [];
 
   for (const line of (await Bun.file(path).text()).split("\n")) {
@@ -85,7 +67,6 @@ export async function read(path: string): Promise<Transcript> {
     aiTitle = str(r.aiTitle) || aiTitle;
     customTitle = str(r.customTitle) || customTitle;
     cwd ??= str(r.cwd) || null;
-    branch = str(r.gitBranch) || branch;
 
     const message = (r.message ?? {}) as Record<string, unknown>;
     const declared = str(message.model);
@@ -93,25 +74,18 @@ export async function read(path: string): Promise<Transcript> {
 
     if (r.type !== "user" && r.type !== "assistant") continue;
     const text = prose(message.content);
-    if (text) {
-      turns.push({ role: r.type, text, createdAt: isoOr(r.timestamp, fallbackTime) });
-    }
+    if (text) turns.push({ role: r.type, text, createdAt: isoOr(r.timestamp, fallbackTime) });
   }
 
-  const opening = turns.find((t) => t.role === "user");
-  const derived = opening ? (opening.text.split("\n")[0] ?? "").slice(0, 100).trim() : "";
-
   return {
+    provider: "claudeAgent",
     path,
     sessionId,
-    title: customTitle || aiTitle || derived || "Imported thread",
+    title: customTitle || aiTitle || deriveTitle(turns, "Imported thread"),
     model,
     cwd,
-    branch,
     turns,
-    updatedAt: fallbackTime,
     stat: { size: st.size, mtimeMs: st.mtimeMs, dev: st.dev, ino: st.ino },
+    generated: 0,
   };
 }
-
-export const hasUserTurn = (t: Transcript): boolean => t.turns.some((x) => x.role === "user");

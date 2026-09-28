@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 export interface Config {
   readonly claudeProjects: string;
+  readonly codexHome: string;
   readonly db: string;
   readonly runtimeFile: string;
   readonly worktrees: string;
@@ -16,6 +17,7 @@ export function loadConfig(
   const t3Home = env.T3CODE_HOME ?? join(home, ".t3");
   return {
     claudeProjects: join(claudeHome, "projects"),
+    codexHome: env.CODEX_HOME ?? join(home, ".codex"),
     db: join(t3Home, "userdata", "state.sqlite"),
     runtimeFile: join(t3Home, "userdata", "server-runtime.json"),
     worktrees: join(t3Home, "worktrees"),
