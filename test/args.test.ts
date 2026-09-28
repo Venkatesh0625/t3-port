@@ -31,3 +31,13 @@ describe("argument parsing", () => {
     expect(parse(["-h"]).flags.help).toBe(true);
   });
 });
+
+test("--all is gone; bare import means every importable session", () => {
+  expect(() => parse(["import", "--all"])).toThrow(/Unknown option/);
+  expect(parse(["import"]).refs).toEqual([]);
+});
+
+test("undo takes an optional run reference", () => {
+  expect(parse(["undo"]).refs).toEqual([]);
+  expect(parse(["undo", "d03f8e72"]).refs).toEqual(["d03f8e72"]);
+});

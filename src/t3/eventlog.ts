@@ -21,8 +21,23 @@ export interface Command {
   readonly events: readonly PlannedEvent[];
 }
 
+/**
+ * Every event one run writes carries the same correlation id.
+ *
+ * T3 fills that column with the command id and never reads it back — it is provenance only.
+ * Using it to mark a run means a run can be found again later without adding a table of our own
+ * or putting unknown keys in T3's event metadata, which is a closed schema.
+ */
 export class EventLog {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly runId: string = randomUUID(),
+  ) {}
+
+  /** The id tying this run's events together. */
+  get run(): string {
+    return this.runId;
+  }
 
   private nextVersion(aggregateKind: string, streamId: string): number {
     const row = this.db
@@ -74,7 +89,7 @@ export class EventLog {
         event.type,
         event.occurredAt,
         commandId,
-        commandId,
+        this.runId,
         JSON.stringify(event.payload),
         JSON.stringify(event.metadata ?? {}),
       );

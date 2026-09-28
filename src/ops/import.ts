@@ -192,6 +192,12 @@ export function plan(
   return { planned, skipped };
 }
 
+export interface ImportOutcome {
+  /** Ties every event this run wrote together, so the run can be undone as a unit. */
+  readonly runId: string;
+  readonly threads: readonly Imported[];
+}
+
 export interface Imported {
   readonly threadId: string;
   readonly title: string;
@@ -206,7 +212,7 @@ export interface Imported {
  * Order matters: the resume cursor goes in before the thread's events, so a thread is never
  * visible without the binding that lets it continue its session.
  */
-export function apply(db: Database, config: Config, plan: Plan, now = nowIso()): Imported[] {
+export function apply(db: Database, config: Config, plan: Plan, now = nowIso()): ImportOutcome {
   const log = new EventLog(db);
   const created = new Map<string, Project>();
   const results: Imported[] = [];
@@ -274,5 +280,5 @@ export function apply(db: Database, config: Config, plan: Plan, now = nowIso()):
     }
   })();
 
-  return results;
+  return { runId: log.run, threads: results };
 }

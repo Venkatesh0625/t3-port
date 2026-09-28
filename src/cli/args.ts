@@ -9,7 +9,6 @@ import { PROVIDERS, type Provider } from "../providers/index.ts";
  * flag rather than needing one added here.
  */
 const OPTIONS = {
-  all: { type: "boolean" },
   "dry-run": { type: "boolean" },
   project: { type: "string" },
   "force-project": { type: "boolean" },

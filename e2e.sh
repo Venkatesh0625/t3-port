@@ -38,18 +38,18 @@ check "codex only"       "$(run list --codex  2>/dev/null | grep -c 'codex ')"  
 
 head2 "import --dry-run writes nothing"
 BEFORE=$(q "select count(*) from orchestration_events")
-run import --all --dry-run >/dev/null 2>&1
+run import --dry-run >/dev/null 2>&1
 check "event count unchanged" "$(q 'select count(*) from orchestration_events')" "$BEFORE"
 
 head2 "import (claude)"
-run import --all --claude >/dev/null 2>&1
+run import --claude >/dev/null 2>&1
 CL=$(q "select count(*) from provider_session_runtime where thread_id glob 'import:claudeAgent:*'")
 [ "$CL" -gt 0 ] && ok "imported $CL claude thread(s)" || bad "imported no claude threads"
 check "cursors carry a resume key" \
   "$(q "select count(*) from provider_session_runtime where thread_id glob 'import:claudeAgent:*' and json_extract(resume_cursor_json,'\$.resume') is null")" "0"
 
 head2 "import (codex)"
-run import --all --codex --drop-generated >/dev/null 2>&1
+run import --codex --drop-generated >/dev/null 2>&1
 CX=$(q "select count(*) from provider_session_runtime where thread_id glob 'import:codex:*'")
 [ "$CX" -gt 0 ] && ok "imported $CX codex thread(s)" || bad "imported no codex threads"
 check "cursors have NO resume key" \
@@ -70,32 +70,40 @@ check "roles are only user/assistant" \
   "$(q "select count(*) from orchestration_events where stream_id glob 'import:*' and event_type='thread.message-sent' and json_extract(payload_json,'\$.role') not in ('user','assistant')")" "0"
 
 head2 "idempotency"
-check "re-import plans nothing" "$(run import --all --drop-generated --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "0"
+check "re-import plans nothing" "$(run import --drop-generated --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "0"
 
-head2 "undo"
-DEL0=$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")
-run undo --all --dry-run >/dev/null 2>&1
-check "dry-run deletes nothing" \
-  "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$DEL0"
-run undo --all >/dev/null 2>&1
-TOTAL=$((DEL0+CL+CX))
-check "one thread.deleted per imported thread" \
-  "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$TOTAL"
-run undo --all >/dev/null 2>&1
-check "a second undo adds nothing" \
-  "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$TOTAL"
+head2 "runs"
+check "two imports are two runs" "$(run runs 2>/dev/null | grep -cE '^  [0-9a-f]{8}  ')" "2"
+
+head2 "undo pops an unread run whole"
+EV=$(q "select count(*) from orchestration_events")
+run undo --dry-run >/dev/null 2>&1
+check "dry-run changes nothing" "$(q 'select count(*) from orchestration_events')" "$EV"
+run undo >/dev/null 2>&1
+check "codex streams gone"  "$(q "select count(distinct stream_id) from orchestration_events where stream_id glob 'import:codex:*'")" "0"
+check "codex bindings gone" "$(q "select count(*) from provider_session_runtime where thread_id glob 'import:codex:*'")" "0"
+check "the other run is untouched" "$(q "select count(distinct stream_id) from orchestration_events where stream_id glob 'import:claudeAgent:*'")" "$CL"
+check "its sessions are importable again" "$(run import --codex --drop-generated --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "$CX"
+
+head2 "undo compensates once T3 has read a run"
+sqlite3 "$SB/t3/userdata/state.sqlite" "update projection_state set last_applied_sequence = (select max(sequence) from orchestration_events);"
+run undo >/dev/null 2>&1
+check "streams are kept"                "$(q "select count(distinct stream_id) from orchestration_events where stream_id glob 'import:claudeAgent:*'")" "$CL"
+check "one thread.deleted per thread"   "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$CL"
+run undo >/dev/null 2>&1
+check "a second undo adds nothing"      "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$CL"
 
 head2 "guards"
 cp ~/.t3/userdata/server-runtime.json "$SB/t3/userdata/" 2>/dev/null
-run import --all >/dev/null 2>&1; check "refuses while T3 runs" "$?" "1"
+run import >/dev/null 2>&1; check "refuses while T3 runs" "$?" "1"
 rm -f "$SB/t3/userdata/server-runtime.json"
 sqlite3 "$SB/t3/userdata/state.sqlite" "ALTER TABLE projection_thread_messages ADD COLUMN drift_probe TEXT;" 2>/dev/null
 run doctor >/dev/null 2>&1;            check "doctor flags schema drift" "$?" "1"
-run import --all >/dev/null 2>&1;      check "import refuses on drift"   "$?" "1"
-run import --all --force --dry-run >/dev/null 2>&1; check "--force overrides" "$?" "0"
+run import >/dev/null 2>&1;            check "import refuses on drift"   "$?" "1"
+run import --force --dry-run >/dev/null 2>&1; check "--force overrides" "$?" "0"
 
-head2 "undo is final"
-check "an undone session is not offered again" "$(run import --all --drop-generated --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "0"
+head2 "a compensated run stays claimed"
+check "its sessions are not offered again" "$(run import --claude --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "0"
 
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] && echo "sandbox: $SB (delete when done)" 

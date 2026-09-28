@@ -29,14 +29,16 @@ bun run src/main.ts doctor
 
 ```sh
 t3-port doctor                 # is this tool safe against your installed T3?
-t3-port list                   # Claude sessions, marked t3 / imported / -
-t3-port import --all --dry-run # plan, write nothing
-t3-port import --all           # write (quit T3 Code first)
+t3-port list                   # sessions on disk, marked t3 / imported / -
+t3-port import --dry-run       # plan; no references means every importable session
+t3-port import                 # write (quit T3 Code first)
+t3-port runs                   # import runs, newest first
+t3-port undo                   # take the newest import back
+t3-port undo d03f8e72          # or a specific run
 
-t3-port import --codex --all   # one provider only (--claude likewise)
-t3-port import 347cd91a                          # one session, by id prefix
-t3-port import --all --project ~/personal/app    # force the target project
-t3-port import --all --create-project            # create projects as needed
+t3-port import --codex --drop-generated   # one provider
+t3-port import 347cd91a                   # one session, by id prefix
+t3-port import --project ~/personal/app   # only sessions that ran under this project
 ```
 
 `doctor` exits 1 when T3's schema has drifted, so it works in a script:
@@ -184,9 +186,22 @@ cursor shapes per provider, no `stream_version` gaps, a receipt per event, one s
 thread, no stream created twice, idempotent re-import, undo finality, and each guard. It writes
 nothing outside `/tmp/t3-port-e2e`.
 
-## Undo is final for a session
+## Undo is a stack
 
-A thread id is derived from the session id, so a session owns one event stream forever.
-Re-importing after an undo would append a second creation to that stream, leaving an aggregate
-T3 cannot fold into one thread. `undo` therefore frees the conversation, not the id: the session
-stays marked as imported. To genuinely start over, restore a backup from before the import.
+Every import is one run, tied together by the correlation id its events share — a column T3
+fills with the command id and never reads back, so marking a run needs no table of our own and
+no unknown keys in T3's event metadata, which is a closed schema.
+
+`t3-port runs` lists them and `t3-port undo` pops the newest, or a named one. What that does
+depends on whether T3 has folded the run into its projections, which `runs` reports:
+
+| State | Undo |
+| --- | --- |
+| **not yet read** — T3 has not started since the import | the run is lifted out entirely: events, receipts, bindings, and any project it created and nothing else uses. No trace, and its sessions become importable again. |
+| **read by T3** | its threads are deleted the way T3 deletes a thread. The events stay, and the sessions stay claimed. |
+
+The difference is forced by the projection cursor. It only moves forward, so a run above it has
+never been seen and can be removed cleanly. Once T3 has projected those events, deleting them
+would strand the projection rows they produced, and a compensating deletion is the only honest
+reversal — which also means the thread id stays taken, since a thread id comes from its session
+and re-importing would give one stream two creation events.

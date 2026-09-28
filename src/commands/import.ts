@@ -10,13 +10,9 @@ export async function runImport(args: Args): Promise<number> {
   const dryRun = args.flags["dry-run"] === true;
   const dropGenerated = args.flags["drop-generated"] === true;
 
-  if (args.flags.all !== true && args.refs.length === 0) {
-    console.error("Name a session, or pass --all.");
-    return 2;
-  }
-
+  // No references means every importable session; the filters narrow it from there.
   const sessions =
-    args.flags.all === true
+    args.refs.length === 0
       ? await collectAll(config, args.providers, { dropGenerated })
       : await collectRefs(config, args.providers, args.refs, { dropGenerated });
 
@@ -52,6 +48,7 @@ export async function runImport(args: Args): Promise<number> {
   console.log(`\nbackup ${backup(db, config.db)}`);
   const done = apply(db, config, result);
   db.close();
-  console.log(`imported ${done.length} thread(s). Start T3 Code to see them.`);
+  console.log(`imported ${done.threads.length} thread(s) as run ${done.runId.slice(0, 8)}.`);
+  console.log(`Start T3 Code to see them, or "t3-port undo" to take them back.`);
   return 0;
 }
