@@ -3,12 +3,55 @@
 Import Claude Code sessions into [T3 Code](https://github.com/pingdotgg/t3code) as threads that
 resume the same Claude session. Bun + TypeScript, no dependencies.
 
+## Install
+
+Not published to npm, and it could not run under Node as written — it uses `bun:sqlite`,
+`Bun.spawnSync`, `Bun.CryptoHasher` and `Bun.file`. Bun is required.
+
 ```sh
-bun run src/cli.ts doctor                 # is this tool safe against your installed T3?
-bun run src/cli.ts list                   # Claude sessions, marked t3 / imported / -
-bun run src/cli.ts import --all --dry-run # plan
-bun run src/cli.ts import --all           # write (T3 Code must be closed)
+cd t3-port && bun install
+bun link                       # puts `t3-port` on your PATH
 ```
+
+Or build a standalone binary with the runtime embedded, for a machine without Bun:
+
+```sh
+bun run build                  # -> dist/t3-port (~55 MB)
+```
+
+Or skip installing and run it in place:
+
+```sh
+bun run src/cli.ts doctor
+```
+
+## Use
+
+```sh
+t3-port doctor                 # is this tool safe against your installed T3?
+t3-port list                   # Claude sessions, marked t3 / imported / -
+t3-port import --all --dry-run # plan, write nothing
+t3-port import --all           # write (quit T3 Code first)
+
+t3-port import 347cd91a                          # one session, by id prefix
+t3-port import --all --project ~/personal/app    # force the target project
+t3-port import --all --create-project            # create projects as needed
+```
+
+`doctor` exits 1 when T3's schema has drifted, so it works in a script:
+
+```sh
+t3-port doctor && t3-port import --all
+```
+
+### Environment
+
+| Variable | Default |
+| --- | --- |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` |
+| `T3CODE_HOME` | `~/.t3` |
+
+Point `T3CODE_HOME` at a copy of `~/.t3` to rehearse an import against a throwaway database.
 
 ## How it works
 
