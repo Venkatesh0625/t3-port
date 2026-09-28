@@ -33,6 +33,9 @@ underneath a running T3 are stepped over and never projected — and no restart 
   now refuses to recreate an aggregate that has events.
 - **Read state from the log, not the projections.** Projections only advance when T3 starts, so
   anything written since its last run is invisible there.
+- **A scope is a checkout, not a directory tree.** `--path ~` once matched every session on the
+  machine, because everything is below the home directory. Work done in `~/code/app` belongs to
+  that checkout, not to whatever contains it.
 - **Don't guess which project a session belongs to.** Git resolves a live worktree; a deleted
   one only ever produces a suggestion the user confirms.
 - **Prefer the real thing over a plausible one.** Both known data-loss bugs were found by
