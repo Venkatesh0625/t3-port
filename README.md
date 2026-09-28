@@ -184,6 +184,24 @@ user message, so 43 of 73 sessions would be titled `# AGENTS.md instructions for
 `--drop-generated` to filter the known preambles instead. It stays opt-in, and the plan reports
 how many turns it would affect.
 
+## Imported threads arrive settled
+
+That is T3's own behaviour, not a choice made here: its `thread.history.import` command emits a
+`thread.settled` event after the messages, dated to the newest one (`decider.ts:2053`). Imported
+conversations are history, so they stay out of the active list. Un-settle one from the thread
+menu to bring it back.
+
+## Sessions that are still running
+
+An import is a snapshot, and a session that is still being written to will outgrow it. The
+thread keeps the resume cursor, so continuing it in T3 gives the model the whole conversation
+while the thread shows only what existed at import time — and nothing reconciles the two, since
+the session is by then marked imported. Measured on a real transcript: 866 turns on disk, 864 in
+T3, no way to catch up.
+
+So a transcript touched within the last two minutes is skipped, and says so. `--include-live`
+overrides it. Quit the agent first if you want the whole conversation.
+
 ## What it does not import
 
 Text turns only. Tool calls, reasoning blocks, and attachments are dropped — in a representative

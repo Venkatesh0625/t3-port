@@ -3,17 +3,30 @@ import { PortError } from "../errors.ts";
 import type { Provider, ReadOptions } from "../providers/index.ts";
 import type { Session } from "../session.ts";
 
-/** Every session on disk for the given providers, newest first. */
+/**
+ * One entry per session, newest first.
+ *
+ * A transcript can exist in more than one place: Claude keeps a copy at the project root for a
+ * session that ran in a worktree, which locally means 434 files for 225 sessions. Listing both
+ * would double every count and disagree with what an import does, since planning has always
+ * deduplicated. The largest copy wins — it is the one that kept running — which is the rule the
+ * providers already use to resolve a session id to a path.
+ */
 export async function collectAll(
   config: Config,
   providers: readonly Provider[],
   options: ReadOptions,
 ): Promise<Session[]> {
-  const sessions: Session[] = [];
+  const best = new Map<string, Session>();
   for (const provider of providers) {
-    for (const path of provider.list(config)) sessions.push(await provider.read(config, path, options));
+    for (const path of provider.list(config)) {
+      const session = await provider.read(config, path, options);
+      const key = `${provider.id}:${session.sessionId}`;
+      const existing = best.get(key);
+      if (!existing || session.stat.size > existing.stat.size) best.set(key, session);
+    }
   }
-  return sessions.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+  return [...best.values()].sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
 }
 
 /**

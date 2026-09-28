@@ -24,6 +24,7 @@ export async function runImport(args: Args): Promise<number> {
       project: typeof args.flags.project === "string" ? args.flags.project : undefined,
       forceProject: args.flags["force-project"] === true,
       createProject: args.flags["create-project"] === true,
+      includeLive: args.flags["include-live"] === true,
     },
     config.worktrees,
   );

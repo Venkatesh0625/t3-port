@@ -13,6 +13,7 @@ const OPTIONS = {
   project: { type: "string" },
   "force-project": { type: "boolean" },
   "create-project": { type: "boolean" },
+  "include-live": { type: "boolean" },
   "drop-generated": { type: "boolean" },
   sort: { type: "string" },
   limit: { type: "string" },

@@ -21,9 +21,10 @@ BASE=$(ls -t ~/.t3/userdata/state.sqlite.t3-port-*.bak 2>/dev/null | tail -1)
 BASE=${BASE:-~/.t3/userdata/state.sqlite}
 sqlite3 -readonly "$BASE" "VACUUM INTO '$SB/t3/userdata/state.sqlite'"
 echo "  base: $(basename "$BASE")"
-# Transcripts are copied, not linked: import may write into the Claude home.
-cp -R ~/.claude/projects "$SB/claude/projects"
-cp -R ~/.codex/sessions  "$SB/codex/sessions"
+# Copied, not linked: import may write into the Claude home. -p keeps the original mtimes, or
+# every fixture would look like a session still being written to.
+cp -Rp ~/.claude/projects "$SB/claude/projects"
+cp -Rp ~/.codex/sessions  "$SB/codex/sessions"
 echo "  db $(q 'select count(*) from projection_threads where deleted_at is null') live threads,"\
      "$(find "$SB/claude/projects" -name '*.jsonl' | wc -l | tr -d ' ') claude,"\
      "$(find "$SB/codex/sessions" -name '*.jsonl' | wc -l | tr -d ' ') codex transcripts"
@@ -32,11 +33,12 @@ head2 "doctor"
 run doctor >/dev/null 2>&1; check "exits 0 on a matching schema" "$?" "0"
 
 head2 "list"
-# Depth 2 only: deeper files are subagent sidechains, not resumable sessions.
-CLAUDE_N=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' | wc -l | tr -d ' ')
+# Distinct session ids, not files: depth 2 only (deeper files are subagent sidechains), and a
+# transcript can sit in two directories when Claude copies a worktree session to the root.
+CLAUDE_N=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' -exec basename {} .jsonl \; | sort -u | wc -l | tr -d ' ')
 CODEX_N=$(run list --codex 2>/dev/null | head -1 | cut -d' ' -f1)
 # Piped output is never truncated, so a count here is the real total.
-check "claude only lists every transcript" "$(run list --claude 2>/dev/null | grep -c ' claude ')" "$CLAUDE_N"
+check "claude lists each session once" "$(run list --claude 2>/dev/null | grep -c ' claude ')" "$CLAUDE_N"
 check "both providers is the sum" "$(run list 2>/dev/null | grep -cE ' (claude|codex) ')" "$((CLAUDE_N+CODEX_N))"
 check "--limit caps the page"     "$(run list --codex --limit 7 2>/dev/null | grep -c ' codex ')" "7"
 check "--offset skips"            "$(run list --codex --limit 5 --offset 70 2>/dev/null | head -1 | grep -c '71')" "1"
@@ -44,6 +46,14 @@ check "--limit 0 means all"       "$(run list --codex --limit 0 2>/dev/null | gr
 check "a bad limit is rejected"   "$(run list --limit abc 2>&1 | grep -c 'whole number')" "1"
 check "piped output has no escape codes" "$(run list --codex --limit 3 2>/dev/null | grep -c "\\[3")" "0"
 check "the project column is shown" "$(run list --codex --limit 3 2>/dev/null | grep -c 'project')" "1"
+
+head2 "a session still being written to"
+LIVE=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' | head -1)
+touch "$LIVE"
+check "is held back"       "$(run import --claude --dry-run 2>/dev/null | grep -c 'still running')" "1"
+check "--include-live imports it" "$(run import --claude --include-live --dry-run 2>/dev/null | grep -c 'still running')" "0"
+touch -t 202601010000 "$LIVE"
+check "and not once it is quiet" "$(run import --claude --dry-run 2>/dev/null | grep -c 'still running')" "0"
 
 head2 "import --dry-run writes nothing"
 BEFORE=$(q "select count(*) from orchestration_events")

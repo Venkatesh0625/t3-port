@@ -13,6 +13,7 @@ const SKIP_LABEL: Record<SkipReason, string> = {
   "t3-native": "started by T3",
   "no-project": "no project covers its directory",
   "other-project": "ran outside the named project",
+  "in-progress": "still running (--include-live to import anyway)",
 };
 
 

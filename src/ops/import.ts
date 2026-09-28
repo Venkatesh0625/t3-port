@@ -15,7 +15,8 @@ export type SkipReason =
   | "already-imported"
   | "t3-native"
   | "no-project"
-  | "other-project";
+  | "other-project"
+  | "in-progress";
 
 /** A project that does not exist yet. */
 export interface NewProject {
@@ -47,6 +48,17 @@ export interface Plan {
   readonly skipped: readonly Skipped[];
 }
 
+/**
+ * How recently a transcript must have changed to be treated as still running.
+ *
+ * An import is a snapshot. If the agent writes another turn afterwards, the thread keeps the
+ * resume cursor — so continuing it in T3 gives the model the whole conversation while the thread
+ * shows only what existed at import time, and nothing can reconcile the two: the session is
+ * already marked imported. Two minutes is long enough to cover a slow turn without holding back
+ * a session that genuinely finished.
+ */
+export const LIVE_WINDOW_MS = 120_000;
+
 export interface PlanOptions {
   /**
    * Restrict the import to one project, by id, title, or workspace root.
@@ -59,6 +71,10 @@ export interface PlanOptions {
   /** Redirect sessions into the named project regardless of where they ran. */
   readonly forceProject?: boolean;
   readonly createProject?: boolean;
+  /** Import sessions that still look like they are running. */
+  readonly includeLive?: boolean;
+  /** Overridable for tests. */
+  readonly now?: number;
 }
 
 const expand = (path: string): string => resolvePath(path.replace(/^~/, process.env.HOME ?? "~"));
@@ -95,12 +111,22 @@ interface Known {
   readonly imported: ReadonlySet<string>;
 }
 
-function classify(session: Session, provider: Provider, known: Known, worktrees: string): SkipReason | null {
+function classify(
+  session: Session,
+  provider: Provider,
+  known: Known,
+  worktrees: string,
+  options: PlanOptions,
+): SkipReason | null {
   if (!provider.isResumable(session.sessionId)) return "unresumable-session-id";
   if (!hasUserTurn(session)) return "no-user-turn";
   if (known.imported.has(session.sessionId)) return "already-imported";
   if (known.native.has(session.sessionId)) return "t3-native";
   if (session.cwd && under(session.cwd, worktrees)) return "t3-native";
+  if (!options.includeLive) {
+    const age = (options.now ?? Date.now()) - session.stat.mtimeMs;
+    if (age >= 0 && age < LIVE_WINDOW_MS) return "in-progress";
+  }
   return null;
 }
 
@@ -132,7 +158,7 @@ export function plan(
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const reason = classify(session, provider, known(provider), worktrees);
+    const reason = classify(session, provider, known(provider), worktrees, options);
     if (reason) {
       skipped.push({ session, reason });
       continue;

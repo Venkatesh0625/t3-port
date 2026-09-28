@@ -24,6 +24,7 @@ Import
   --project <path|id>    only sessions that ran under this project
   --force-project        with --project, redirect every session there regardless of where it ran
   --create-project       create a project when none covers the session
+  --include-live         import sessions that still look like they are running
   --drop-generated       drop preamble a provider wrote as user turns (Codex AGENTS.md,
                          <environment_context>); off by default so no real user text is removed
 

@@ -4,6 +4,7 @@ import { parseSort, sortRows } from "../src/cli/sort.ts";
 import type { Listed } from "../src/cli/report.ts";
 import type { Session } from "../src/session.ts";
 import { abbreviate, abbreviationWidth } from "../src/cli/abbrev.ts";
+import { LIVE_WINDOW_MS, plan } from "../src/ops/import.ts";
 
 const session = (over: Partial<Session> & { sessionId: string }): Session => ({
   provider: "codex",
@@ -127,16 +128,25 @@ describe("session id abbreviation", () => {
     ).toBe(8);
   });
 
-  test("grows past a shared prefix (Codex's time-ordered v7 ids)", () => {
+  test("grows past a shared prefix, to the next whole group", () => {
     // Both start 01a0e776: the first 48 bits of a UUIDv7 are a millisecond timestamp.
+    const ids = ["01a0e776-e594-7722-86ec-c75d00d64a29", "01a0e776-ab49-76a3-a96d-da1c67ca38ef"];
+    const width = abbreviationWidth(ids);
+    expect(width).toBe(13);
+    expect(ids.map((id) => id.slice(0, width))).toEqual(["01a0e776-e594", "01a0e776-ab49"]);
+  });
+
+  test("a truncated group is never shown", () => {
     const width = abbreviationWidth([
       "01a0e776-e594-7722-86ec-c75d00d64a29",
       "01a0e776-ab49-76a3-a96d-da1c67ca38ef",
+      "01a0e776-ac00-7000-8000-000000000000",
     ]);
-    expect(width).toBeGreaterThan(8);
-    expect("01a0e776-e594-7722-86ec-c75d00d64a29".slice(0, width)).not.toBe(
-      "01a0e776-ab49-76a3-a96d-da1c67ca38ef".slice(0, width),
-    );
+    expect([8, 13, 18, 23, 36]).toContain(width);
+  });
+
+  test("ids that are not UUIDs still grow one character at a time", () => {
+    expect(abbreviationWidth(["import-aaa", "import-aab"])).toBe(10);
   });
 
   test("one width is used for the whole listing, so the column stays aligned", () => {
@@ -150,5 +160,54 @@ describe("session id abbreviation", () => {
 
   test("identical ids cannot be split, so it stops at full length", () => {
     expect(abbreviationWidth(["aaaaaaaaaa", "aaaaaaaaaa"])).toBe(10);
+  });
+
+  test("an empty listing needs no width", () => {
+    expect(abbreviationWidth([])).toBe(8);
+  });
+});
+
+describe("abbreviation is not derailed by duplicates", () => {
+  test("a repeated id cannot be split, so the width does not blow up for the rest", () => {
+    // Listings deduplicate before this point; the guard keeps a stray duplicate from
+    // forcing every id in the column to its full length.
+    const width = abbreviationWidth([
+      "70abaae3-6bac-4834-abed-04720e8ba949",
+      "70abaae3-6bac-4834-abed-04720e8ba949",
+    ]);
+    expect(width).toBe(36);
+  });
+});
+
+describe("sessions that are still running", () => {
+  const NOW = 1_800_000_000_000;
+
+  const fresh = (mtimeMs: number): Session =>
+    session({
+      sessionId: "347cd91a-749f-4f92-a41d-4b8e82e158d9",
+      provider: "claudeAgent",
+      cwd: "/repo",
+      turns: [{ role: "user", text: "hi", createdAt: "2026-01-01T00:00:00.000Z" }],
+      stat: { size: 1, mtimeMs, dev: 0, ino: 0 },
+    });
+
+  const reasonFor = (mtimeMs: number, includeLive = false) =>
+    plan(
+      { query: () => ({ all: () => [], get: () => undefined }) } as never,
+      [fresh(mtimeMs)],
+      { includeLive, now: NOW },
+      "/worktrees",
+    ).skipped[0]?.reason;
+
+  test("a transcript written seconds ago is held back", () => {
+    expect(reasonFor(NOW - 5_000)).toBe("in-progress");
+  });
+
+  test("one untouched for longer than the window is not", () => {
+    expect(reasonFor(NOW - LIVE_WINDOW_MS - 1)).not.toBe("in-progress");
+  });
+
+  test("--include-live overrides it", () => {
+    expect(reasonFor(NOW - 5_000, true)).not.toBe("in-progress");
   });
 });
