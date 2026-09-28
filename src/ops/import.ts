@@ -3,6 +3,7 @@ import { resolve as resolvePath } from "node:path";
 import type { Config } from "../config.ts";
 import { byId, type Provider } from "../providers/index.ts";
 import { hasUserTurn, type Session } from "../session.ts";
+import { isNoise } from "../noise.ts";
 import { nowIso } from "../time.ts";
 import { enclosing, nameOf, suggest, under } from "./locate.ts";
 import { bindSession, importedThreadId, projectCreate, threadCreate, threadHistoryImport } from "../t3/commands.ts";
@@ -16,7 +17,8 @@ export type SkipReason =
   | "t3-native"
   | "no-project"
   | "other-project"
-  | "in-progress";
+  | "in-progress"
+  | "noise";
 
 /** A project that does not exist yet. */
 export interface NewProject {
@@ -73,6 +75,8 @@ export interface PlanOptions {
   readonly createProject?: boolean;
   /** Import sessions that still look like they are running. */
   readonly includeLive?: boolean;
+  /** Import command records and one-line sessions too. */
+  readonly includeNoise?: boolean;
   /** Overridable for tests. */
   readonly now?: number;
 }
@@ -123,6 +127,7 @@ function classify(
   if (known.imported.has(session.sessionId)) return "already-imported";
   if (known.native.has(session.sessionId)) return "t3-native";
   if (session.cwd && under(session.cwd, worktrees)) return "t3-native";
+  if (!options.includeNoise && isNoise(session)) return "noise";
   if (!options.includeLive) {
     const age = (options.now ?? Date.now()) - session.stat.mtimeMs;
     if (age >= 0 && age < LIVE_WINDOW_MS) return "in-progress";

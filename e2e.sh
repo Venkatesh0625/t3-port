@@ -39,14 +39,15 @@ head2 "list"
 # Distinct session ids, not files: depth 2 only (deeper files are subagent sidechains), and a
 # transcript can sit in two directories when Claude copies a worktree session to the root.
 CLAUDE_N=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' -exec basename {} .jsonl \; | sort -u | wc -l | tr -d ' ')
-CODEX_N=$(runs_in list --codex 2>/dev/null | head -1 | cut -d' ' -f1)
+CODEX_N=$(runs_in list --codex --include-noise 2>/dev/null | head -1 | cut -d' ' -f1)
 # Piped output is never truncated, so a count here is the real total.
 check "--path is required"        "$(run list 2>&1 | grep -c 'path <dir> is required')" "1"
 check "a scope narrows the listing" "$([ "$(runs_in list 2>/dev/null | head -1 | cut -d' ' -f1)" -lt "$CLAUDE_N" ] && echo yes)" "yes"
 check "both providers appear"     "$(runs_in list 2>/dev/null | grep -cE ' (claude|codex) ' | awk '{print ($1>0)?1:0}')" "1"
-check "--limit caps the page"     "$(runs_in list --codex --limit 7 2>/dev/null | grep -c ' codex ')" "7"
-check "--offset skips"            "$(runs_in list --codex --limit 2 --offset 1 2>/dev/null | head -1 | grep -c 'showing 2')" "1"
-check "--limit 0 means all"       "$(runs_in list --codex --limit 0 2>/dev/null | grep -c ' codex ')" "$CODEX_N"
+check "--limit caps the page"     "$(runs_in list --codex --include-noise --limit 7 2>/dev/null | grep -c ' codex ')" "7"
+check "--offset skips"            "$(runs_in list --codex --include-noise --limit 2 --offset 1 2>/dev/null | head -1 | grep -c 'showing 2')" "1"
+check "--limit 0 means all"       "$(runs_in list --codex --include-noise --limit 0 2>/dev/null | grep -c ' codex ')" "$CODEX_N"
+check "noise is hidden by default" "$([ "$(runs_in list --codex 2>/dev/null | head -1 | cut -d' ' -f1)" -lt "$CODEX_N" ] && echo yes)" "yes"
 check "a bad limit is rejected"   "$(runs_in list --limit abc 2>&1 | grep -c 'whole number')" "1"
 check "piped output has no escape codes" "$(runs_in list --codex --limit 3 2>/dev/null | grep -c "\\[3")" "0"
 check "the project column is shown" "$(runs_in list --codex --limit 3 2>/dev/null | grep -c 'project')" "1"
@@ -113,11 +114,14 @@ check "its sessions are importable again" "$(runs_in import --codex --drop-gener
 
 head2 "undo compensates once T3 has read a run"
 sqlite3 "$SB/t3/userdata/state.sqlite" "update projection_state set last_applied_sequence = (select max(sequence) from orchestration_events);"
+# However many threads the surviving run holds; noise filtering changes the count, not the rule.
+LEFT=$(q "select count(distinct stream_id) from orchestration_events where event_type='thread.created' and stream_id glob 'import:*' and stream_id not in (select stream_id from orchestration_events where event_type='thread.deleted')")
+run undo >/dev/null 2>&1
 run undo >/dev/null 2>&1
 check "streams are kept"                "$(q "select count(distinct stream_id) from orchestration_events where stream_id glob 'import:claudeAgent:*'")" "$CL"
-check "one thread.deleted per thread"   "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$CL"
+check "one thread.deleted per thread"   "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$LEFT"
 run undo >/dev/null 2>&1
-check "a second undo adds nothing"      "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$CL"
+check "a second undo adds nothing"      "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$LEFT"
 
 head2 "guards"
 cp ~/.t3/userdata/server-runtime.json "$SB/t3/userdata/" 2>/dev/null

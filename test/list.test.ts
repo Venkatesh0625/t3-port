@@ -187,7 +187,12 @@ describe("sessions that are still running", () => {
       sessionId: "347cd91a-749f-4f92-a41d-4b8e82e158d9",
       provider: "claudeAgent",
       cwd: "/repo",
-      turns: [{ role: "user", text: "hi", createdAt: "2026-01-01T00:00:00.000Z" }],
+      // Long enough not to read as a command record, which is checked before liveness.
+      turns: [
+        { role: "user", text: "walk me through the retry logic in the worker", createdAt: "2026-01-01T00:00:00.000Z" },
+        { role: "assistant", text: "it retries three times", createdAt: "2026-01-01T00:00:01.000Z" },
+        { role: "user", text: "and what happens after that", createdAt: "2026-01-01T00:00:02.000Z" },
+      ],
       stat: { size: 1, mtimeMs, dev: 0, ino: 0 },
     });
 

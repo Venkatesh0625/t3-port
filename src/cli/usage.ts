@@ -5,6 +5,7 @@ export const USAGE = `t3-port — move conversation history into T3 Code
   t3-port doctor                    check this tool against the installed T3 Code
   t3-port list --path <dir>         sessions from a checkout, with their status in T3
   t3-port import --path <dir>       import a checkout's sessions as T3 threads
+  t3-port prune --path <dir>        find transcript copies nothing can reach
   t3-port runs                      import runs, newest first
   t3-port undo [run]                undo the newest import, or a named run
 
@@ -20,6 +21,7 @@ List
   Terms filter by substring across agent, session id, project, directory and title. Every term
   must match, so they narrow: "list codex web-app" is Codex sessions under web-app.
 
+  --include-noise        show command records and one-line sessions
   --sort <field>         recent (default), project, turns, agent or title
   --limit <n>            rows to show; 0 for all. Defaults to 40 in a terminal, all when piped
   --offset <n>           skip this many rows
@@ -31,8 +33,12 @@ Import
   --force-project        with --project, redirect every session there regardless of where it ran
   --create-project       create a project when none covers the session
   --include-live         import sessions that still look like they are running
+  --include-noise        import command records and one-line sessions too
   --drop-generated       drop preamble a provider wrote as user turns (Codex AGENTS.md,
                          <environment_context>); off by default so no real user text is removed
+
+Prune
+  --delete               actually remove them; without it, prune only reports
 
 Undo
   --dry-run              show what would change, change nothing

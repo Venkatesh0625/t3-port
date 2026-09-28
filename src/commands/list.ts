@@ -1,8 +1,9 @@
 import { loadConfig } from "../config.ts";
 import { requireScope, type Args } from "../cli/args.ts";
 import { collectAll } from "../cli/sessions.ts";
-import { sessionHeader, sessionLine, type Listed } from "../cli/report.ts";
+import { projectWidth, sessionHeader, sessionLine, type Listed } from "../cli/report.ts";
 import { matches } from "../cli/filter.ts";
+import { isNoise } from "../noise.ts";
 import { abbreviate } from "../cli/abbrev.ts";
 import { parseSort, sortRows } from "../cli/sort.ts";
 import { PortError } from "../errors.ts";
@@ -48,8 +49,12 @@ export async function list(args: Args): Promise<number> {
   });
   db.close();
 
+  const showNoise = args.flags["include-noise"] === true;
+  const signal = showNoise ? rows : rows.filter((row) => !isNoise(row.session));
+  const hidden = rows.length - signal.length;
+
   const found = sortRows(
-    rows.filter((row) => matches(row, labelOf(row.session.provider), terms)),
+    signal.filter((row) => matches(row, labelOf(row.session.provider), terms)),
     parseSort(args.flags.sort),
     labelOf,
   );
@@ -73,8 +78,14 @@ export async function list(args: Args): Promise<number> {
   const id = abbreviate(rows.map((r) => r.session.sessionId));
   const note = tooLargeNote(skipped);
   if (note) console.log(note);
-  console.log(sessionHeader(id.width));
-  for (const row of page) console.log(sessionLine(row, (s) => labelOf(s.provider), id.of));
+  // Width comes from the page on show, so a column never pads for rows nobody sees.
+  const width = projectWidth(page);
+  console.log(sessionHeader(id.width, width));
+  for (const row of page) console.log(sessionLine(row, (s) => labelOf(s.provider), id.of, width));
+
+  if (hidden > 0) {
+    console.log(color.dim(`\n${hidden} command and one-liner session(s) hidden — --include-noise to show.`));
+  }
 
   const remaining = found.length - (offset + page.length);
   if (remaining > 0) {

@@ -7,6 +7,7 @@ import { list } from "./commands/list.ts";
 import { runImport } from "./commands/import.ts";
 import { runUndo } from "./commands/undo.ts";
 import { listRuns } from "./commands/runs.ts";
+import { prune } from "./commands/prune.ts";
 
 async function main(argv: readonly string[]): Promise<number> {
   const args = parse(argv);
@@ -21,6 +22,8 @@ async function main(argv: readonly string[]): Promise<number> {
       return await list(args);
     case "import":
       return await runImport(args);
+    case "prune":
+      return await prune(args);
     case "runs":
       return listRuns();
     case "undo":

@@ -2,7 +2,7 @@ import type { Plan, SkipReason } from "../ops/import.ts";
 import { isNew } from "../ops/import.ts";
 import type { ImportedThread } from "../t3/queries.ts";
 import type { Session } from "../session.ts";
-import { shortPath } from "./paths.ts";
+import { describeLocation, formatLocation } from "./location.ts";
 import { color, pad } from "./color.ts";
 import { MAX_TRANSCRIPT_BYTES } from "../session.ts";
 import { abbreviate } from "./abbrev.ts";
@@ -15,10 +15,12 @@ const SKIP_LABEL: Record<SkipReason, string> = {
   "no-project": "no project covers its directory",
   "other-project": "ran outside the named project",
   "in-progress": "still running (--include-live to import anyway)",
+  noise: "a command or one-liner (--include-noise to import anyway)",
 };
 
 
-const PROJECT_WIDTH = 26;
+/** Beyond this the column crowds out the title. */
+export const MAX_PROJECT_WIDTH = 34;
 const TITLE_WIDTH = 46;
 
 export interface Listed {
@@ -28,10 +30,21 @@ export interface Listed {
   readonly project: string | null;
 }
 
-export function sessionHeader(idWidth: number): string {
+/** Where a row ran, as it will be printed. */
+export const locationOf = (row: Listed): string =>
+  formatLocation(describeLocation(row.session.cwd, row.project));
+
+/** Wide enough for the longest location on show, and no wider. */
+export const projectWidth = (rows: readonly Listed[]): number =>
+  Math.min(
+    MAX_PROJECT_WIDTH,
+    rows.reduce((n, row) => Math.max(n, locationOf(row).length), "project".length),
+  );
+
+export function sessionHeader(idWidth: number, projectWidth: number): string {
   return color.dim(
     `${"".padEnd(9)} ${"agent".padEnd(6)} ${"session".padEnd(idWidth)}  ${"turns".padStart(5)}  ` +
-      `${"project".padEnd(PROJECT_WIDTH)}  title`,
+      `${"project".padEnd(projectWidth)}  title`,
   );
 }
 
@@ -46,17 +59,19 @@ export function sessionLine(
   row: Listed,
   label: (s: Session) => string,
   id: (sessionId: string) => string,
+  width: number,
 ): string {
   const { session } = row;
-  // An unplaced session shows where it ran instead: that is usually why it is unplaced.
-  const placed = row.project !== null;
-  const where = row.project ?? session.cwd;
-  const project = where ? shortPath(where, PROJECT_WIDTH) : "—";
+  const shown = formatLocation(describeLocation(session.cwd, row.project), width);
+  // The column describes where a session ran, which the path always answers — so it is dim only
+  // when there is no path at all. Whether a project covers it is the import plan's business,
+  // not a colour here: a worktree whose directory is gone still ran somewhere worth naming.
+  const known = shown !== "NA";
 
   return (
     `${pad(markup(row.mark), 9)} ${color.dim(pad(label(session), 6))} ${color.dim(id(session.sessionId))}  ` +
     `${pad(String(session.turns.length), 5, "right")}  ` +
-    `${pad(placed ? color.cyan(project) : color.dim(project), PROJECT_WIDTH)}  ` +
+    `${pad(known ? color.cyan(shown) : color.dim(shown), width)}  ` +
     session.title.slice(0, TITLE_WIDTH)
   );
 }

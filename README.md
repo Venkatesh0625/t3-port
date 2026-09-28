@@ -29,11 +29,20 @@ Narrow any of it:
 
 ```sh
 t3-port list --path ~/code/web-app      # a checkout and the worktrees made from it
+t3-port prune --path ~/code/web-app     # transcript copies nothing can reach
 t3-port list web-app deploy             # filter by word: agent, id, project, directory, title
 t3-port list --sort project             # group by project
 t3-port import --codex --drop-generated # one provider
 t3-port import 347cd91a                 # one session, by id prefix
 ```
+
+The project column reads `manager/repo/leaf` — `superset/app/few-column`, `t3/app/t3code-e204`,
+`/app/(parent)` for the checkout itself, `NA` when a session recorded no directory. Which tool
+made a worktree and what it came from are the facts that tell two rows apart, so they sit at the
+front and a long worktree name is shortened instead.
+
+Command records and one-line sessions (`/clear`, `/login`, workspace-naming prompts) are hidden
+from listings and skipped by imports; `--include-noise` keeps them.
 
 `--path` names a **checkout**, not a directory tree. `--path ~/code/app` covers that repository,
 its subdirectories and the worktrees made from it, wherever those are kept. It does not cover a

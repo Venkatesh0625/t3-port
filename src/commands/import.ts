@@ -30,6 +30,7 @@ export async function runImport(args: Args): Promise<number> {
       forceProject: args.flags["force-project"] === true,
       createProject: args.flags["create-project"] === true,
       includeLive: args.flags["include-live"] === true,
+      includeNoise: args.flags["include-noise"] === true,
     },
     config.worktrees,
   );
