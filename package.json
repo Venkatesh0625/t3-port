@@ -18,5 +18,9 @@
   "engines": {
     "bun": ">=1.2"
   },
-  "private": true
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Venkatesh0625/t3-port.git"
+  }
 }

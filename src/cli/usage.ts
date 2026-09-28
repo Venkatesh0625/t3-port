@@ -13,7 +13,7 @@ ${PROVIDERS.map((p) => `  --${p.label.padEnd(18)} ${p.id}`).join("\n")}
 
 List
   Terms filter by substring across agent, session id, project, directory and title. Every term
-  must match, so they narrow: "list codex xito" is Codex sessions under xito.
+  must match, so they narrow: "list codex web-app" is Codex sessions under web-app.
 
   --sort <field>         recent (default), project, turns, agent or title
   --limit <n>            rows to show; 0 for all. Defaults to 40 in a terminal, all when piped

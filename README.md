@@ -31,7 +31,7 @@ bun run src/main.ts doctor
 t3-port doctor                 # is this tool safe against your installed T3?
 t3-port list                   # sessions on disk, marked t3 / imported / -
 t3-port list --codex --limit 0 # one provider, no paging
-t3-port list xito cloudflare   # filter by any word: agent, id, project, directory or title
+t3-port list web-app deploy    # filter by any word: agent, id, project, directory or title
 t3-port list --sort project    # group by project
 t3-port import --dry-run       # plan; no references means every importable session
 t3-port import                 # write (quit T3 Code first)
@@ -118,9 +118,9 @@ Command shapes come from T3's own source, not from guessing:
 510 session(s), showing 1–40
 
           agent  session   turns  project                     title
--         codex  01a0e776     12  ~/personal/xito-mono        cloudflare-bot-traffic-alert
-imported  claude 6ac97664    475  ~/personal/xito-mono        Notetaker Cloudflare migration
--         codex  01a0c0be     97  …db6bbe3/incongruous-feels  bl2
+-         codex  01a0e776-e594   12  ~/code/web-app             deploy-preview-cleanup
+imported  claude 6ac97664      475  ~/code/web-app             Migrate the worker to R2
+-         codex  01a0c0be-7a10   97  …/worktrees/quiet-harbour  Retry the failing seed
 ```
 
 The project column is the project a session would import into, resolved exactly the way
@@ -129,7 +129,7 @@ never disagree. A session no project covers shows the directory it ran in instea
 that is usually why it is unplaced.
 
 Positional terms filter by substring across the agent, session id, project, working directory
-and title. Every term must match, so they narrow: `list codex xito` is Codex sessions in xito.
+and title. Every term must match, so they narrow: `list codex web-app` is Codex sessions in web-app.
 
 `--sort` takes `recent` (default), `project`, `turns`, `agent` or `title`. Grouped orderings put
 the largest conversation first inside each group, since a group exists to be scanned and the long

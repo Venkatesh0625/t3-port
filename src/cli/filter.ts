@@ -5,7 +5,7 @@ import type { Listed } from "./report.ts";
  * Free-text filter over a listing.
  *
  * Every term must match somewhere in a row — its agent, session id, project, working directory
- * or title — so terms narrow rather than widen: `list codex xito` is Codex sessions in xito.
+ * or title — so terms narrow rather than widen: `list codex web-app` is Codex sessions in web-app.
  * Matching runs over the same text the row displays, plus the untruncated paths behind it, so
  * something visible on screen is always findable and a shortened path still matches in full.
  */

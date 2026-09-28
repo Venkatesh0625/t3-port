@@ -46,8 +46,8 @@ const row = (over: {
 
 describe("filtering", () => {
   const rows = [
-    row({ id: "01a0e776", title: "cloudflare-bot-traffic-alert", project: "/Users/x/personal/xito-mono" }),
-    row({ id: "019f7b0c", title: "Building many small apps", project: "/Users/x/personal/sa-engine" }),
+    row({ id: "01a0e776", title: "preview-cleanup", project: "/Users/x/code/web-app" }),
+    row({ id: "019f7b0c", title: "Building many small apps", project: "/Users/x/code/api" }),
     row({ id: "abc12345", title: "Deploy API", cwd: "/tmp/scratch" }),
   ];
   const hits = (...terms: string[]) =>
@@ -58,7 +58,7 @@ describe("filtering", () => {
   });
 
   test("matches a title word", () => {
-    expect(hits("cloudflare")).toEqual(["01a0e776"]);
+    expect(hits("preview")).toEqual(["01a0e776"]);
   });
 
   test("matches a session id prefix", () => {
@@ -66,7 +66,7 @@ describe("filtering", () => {
   });
 
   test("matches a project name", () => {
-    expect(hits("xito")).toEqual(["01a0e776"]);
+    expect(hits("web-app")).toEqual(["01a0e776"]);
   });
 
   test("matches the working directory when there is no project", () => {
@@ -78,13 +78,13 @@ describe("filtering", () => {
   });
 
   test("is case-insensitive", () => {
-    expect(hits("CLOUDFLARE")).toEqual(["01a0e776"]);
+    expect(hits("PREVIEW")).toEqual(["01a0e776"]);
   });
 
   test("terms narrow rather than widen", () => {
-    expect(hits("codex", "xito")).toEqual(["01a0e776"]);
-    expect(hits("xito", "cloudflare")).toEqual(["01a0e776"]);
-    expect(hits("xito", "nothing")).toEqual([]);
+    expect(hits("codex", "web-app")).toEqual(["01a0e776"]);
+    expect(hits("web-app", "preview")).toEqual(["01a0e776"]);
+    expect(hits("web-app", "nothing")).toEqual([]);
   });
 });
 
