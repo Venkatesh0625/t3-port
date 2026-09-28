@@ -2,6 +2,9 @@ import { loadConfig } from "../config.ts";
 import type { Args } from "../cli/args.ts";
 import { collectAll } from "../cli/sessions.ts";
 import { sessionHeader, sessionLine, type Listed } from "../cli/report.ts";
+import { matches } from "../cli/filter.ts";
+import { abbreviate } from "../cli/abbrev.ts";
+import { parseSort, sortRows } from "../cli/sort.ts";
 import { PortError } from "../errors.ts";
 import { enclosing } from "../ops/locate.ts";
 import { color } from "../cli/color.ts";
@@ -29,6 +32,9 @@ export async function list(args: Args): Promise<number> {
   );
   const label = new Map(args.providers.map((p) => [p.id, p.label]));
 
+  const labelOf = (providerId: string): string => label.get(providerId) ?? providerId;
+  const terms = args.refs;
+
   const rows: Listed[] = sessions.map((session) => {
     const k = known.get(session.provider);
     return {
@@ -39,20 +45,28 @@ export async function list(args: Args): Promise<number> {
   });
   db.close();
 
+  const found = sortRows(
+    rows.filter((row) => matches(row, labelOf(row.session.provider), terms)),
+    parseSort(args.flags.sort),
+    labelOf,
+  );
+
   // Only a terminal gets a page; a pipe gets everything, so `| grep` and `| wc` behave.
   const interactive = process.stdout.isTTY === true;
   const offset = positiveInt(args.flags.offset, "offset", 0);
   const limit = positiveInt(args.flags.limit, "limit", interactive ? TTY_LIMIT : 0);
-  const page = limit === 0 ? rows.slice(offset) : rows.slice(offset, offset + limit);
+  const page = limit === 0 ? found.slice(offset) : found.slice(offset, offset + limit);
 
   const shown = page.length === 0 ? "none" : `${offset + 1}–${offset + page.length}`;
-  console.log(`${color.bold(String(rows.length))} session(s), showing ${shown}\n`);
-  console.log(sessionHeader());
-  for (const row of page) {
-    console.log(sessionLine(row, (s) => label.get(s.provider) ?? s.provider));
-  }
+  const scope = terms.length > 0 ? ` matching ${terms.map((t) => `"${t}"`).join(" ")}` : "";
+  const of = terms.length > 0 ? color.dim(` of ${rows.length}`) : "";
+  console.log(`${color.bold(String(found.length))} session(s)${scope}${of}, showing ${shown}\n`);
+  // Width is computed over everything listed, so an id stays unique as pages change.
+  const id = abbreviate(found.map((r) => r.session.sessionId));
+  console.log(sessionHeader(id.width));
+  for (const row of page) console.log(sessionLine(row, (s) => labelOf(s.provider), id.of));
 
-  const remaining = rows.length - (offset + page.length);
+  const remaining = found.length - (offset + page.length);
   if (remaining > 0) {
     console.log(color.dim(`\n${remaining} more — "--offset ${offset + page.length}", "--limit 0", or pipe to a pager.`));
   }

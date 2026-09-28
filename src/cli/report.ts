@@ -4,6 +4,7 @@ import type { ImportedThread } from "../t3/queries.ts";
 import type { Session } from "../session.ts";
 import { shortPath } from "./paths.ts";
 import { color, pad } from "./color.ts";
+import { abbreviate } from "./abbrev.ts";
 
 const SKIP_LABEL: Record<SkipReason, string> = {
   "no-user-turn": "no user turn",
@@ -14,7 +15,6 @@ const SKIP_LABEL: Record<SkipReason, string> = {
   "other-project": "ran outside the named project",
 };
 
-const short = (id: string): string => id.slice(0, 8);
 
 const PROJECT_WIDTH = 26;
 const TITLE_WIDTH = 46;
@@ -26,9 +26,9 @@ export interface Listed {
   readonly project: string | null;
 }
 
-export function sessionHeader(): string {
+export function sessionHeader(idWidth: number): string {
   return color.dim(
-    `${"".padEnd(9)} ${"agent".padEnd(6)} ${"session".padEnd(8)}  ${"turns".padStart(5)}  ` +
+    `${"".padEnd(9)} ${"agent".padEnd(6)} ${"session".padEnd(idWidth)}  ${"turns".padStart(5)}  ` +
       `${"project".padEnd(PROJECT_WIDTH)}  title`,
   );
 }
@@ -40,17 +40,19 @@ function markup(mark: string): string {
   return color.dim("-");
 }
 
-export function sessionLine(row: Listed, label: (s: Session) => string): string {
+export function sessionLine(
+  row: Listed,
+  label: (s: Session) => string,
+  id: (sessionId: string) => string,
+): string {
   const { session } = row;
   // An unplaced session shows where it ran instead: that is usually why it is unplaced.
   const placed = row.project !== null;
   const where = row.project ?? session.cwd;
-  const project = where
-    ? shortPath(where, PROJECT_WIDTH)
-    : "—";
+  const project = where ? shortPath(where, PROJECT_WIDTH) : "—";
 
   return (
-    `${pad(markup(row.mark), 9)} ${color.dim(pad(label(session), 6))} ${color.dim(short(session.sessionId))}  ` +
+    `${pad(markup(row.mark), 9)} ${color.dim(pad(label(session), 6))} ${color.dim(id(session.sessionId))}  ` +
     `${pad(String(session.turns.length), 5, "right")}  ` +
     `${pad(placed ? color.cyan(project) : color.dim(project), PROJECT_WIDTH)}  ` +
     session.title.slice(0, TITLE_WIDTH)
@@ -61,6 +63,7 @@ export function planSummary(plan: Plan): string {
   const counts = new Map<SkipReason, number>();
   for (const s of plan.skipped) counts.set(s.reason, (counts.get(s.reason) ?? 0) + 1);
 
+  const id = abbreviate([...plan.planned, ...plan.skipped].map((i) => i.session.sessionId)).of;
   const lines = [
     `${color.bold(String(plan.planned.length))} to import, ${plan.skipped.length} skipped`,
   ];
@@ -72,7 +75,7 @@ export function planSummary(plan: Plan): string {
   for (const item of plan.planned) {
     const root = isNew(item.target) ? `${item.target.workspaceRoot} (new)` : item.target.workspaceRoot;
     lines.push(
-      `  ${short(item.session.sessionId)}  ${String(item.session.turns.length).padStart(4)} turns  ` +
+      `  ${id(item.session.sessionId)}  ${String(item.session.turns.length).padStart(4)} turns  ` +
         item.session.title.slice(0, 44),
     );
     lines.push(
@@ -86,7 +89,7 @@ export function planSummary(plan: Plan): string {
   if (suggestions.length > 0) {
     lines.push("", color.yellow(`${suggestions.length} session(s) look like worktrees of a project you have:`));
     for (const s of suggestions.slice(0, 5)) {
-      lines.push(`  ${short(s.session.sessionId)}  ${s.session.cwd}`);
+      lines.push(`  ${id(s.session.sessionId)}  ${s.session.cwd}`);
       lines.push(`            probably ${s.suggestion} — confirm with --project`);
     }
   }
@@ -94,9 +97,10 @@ export function planSummary(plan: Plan): string {
 }
 
 export function threadList(threads: readonly ImportedThread[], limit = 15): string {
+  const id = abbreviate(threads.map((t) => t.sessionId ?? t.threadId)).of;
   const lines = threads
     .slice(0, limit)
-    .map((t) => `  ${short(t.sessionId ?? t.threadId)}  ${t.title.slice(0, 60)}`);
+    .map((t) => `  ${id(t.sessionId ?? t.threadId)}  ${t.title.slice(0, 60)}`);
   if (threads.length > limit) lines.push(`  ... ${threads.length - limit} more`);
   return lines.join("\n");
 }

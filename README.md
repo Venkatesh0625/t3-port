@@ -31,6 +31,8 @@ bun run src/main.ts doctor
 t3-port doctor                 # is this tool safe against your installed T3?
 t3-port list                   # sessions on disk, marked t3 / imported / -
 t3-port list --codex --limit 0 # one provider, no paging
+t3-port list xito cloudflare   # filter by any word: agent, id, project, directory or title
+t3-port list --sort project    # group by project
 t3-port import --dry-run       # plan; no references means every importable session
 t3-port import                 # write (quit T3 Code first)
 t3-port runs                   # import runs, newest first
@@ -126,6 +128,18 @@ The project column is the project a session would import into, resolved exactly 
 never disagree. A session no project covers shows the directory it ran in instead, dimmed, since
 that is usually why it is unplaced.
 
+Positional terms filter by substring across the agent, session id, project, working directory
+and title. Every term must match, so they narrow: `list codex xito` is Codex sessions in xito.
+
+`--sort` takes `recent` (default), `project`, `turns`, `agent` or `title`. Grouped orderings put
+the largest conversation first inside each group, since a group exists to be scanned and the long
+conversations are the ones worth finding.
+
+Session ids are abbreviated to the shortest width that keeps them unique, like git's short
+hashes, and what is printed can be pasted straight into `import`. A fixed eight characters would
+be wrong: Codex ids are UUIDv7, whose first 48 bits are a millisecond timestamp, so sessions
+started moments apart share a prefix — 25 of 78 local rollouts collided at eight.
+
 A terminal gets 40 rows; piped output is never truncated and carries no escape codes, so
 `| grep` and `| wc -l` work. `--limit` and `--offset` override, and `--limit 0` means all.
 Colour follows NO_COLOR and FORCE_COLOR.
@@ -147,9 +161,15 @@ thread leaves the session unresumable.
 
 ### Thread names
 
-A rollout records the conversation but not what it is called: the name `/rename` sets lives in
-`~/.codex/session_index.jsonl`, one `{id, thread_name}` per line. Sessions that were renamed use
-that name; the rest fall back to their first real user turn — first real, because a title of
+A rollout records the conversation but never its name. The authoritative store is
+`~/.codex/state_<n>.sqlite`, whose `threads` table holds a short `name` — its `title` and
+`preview` columns are only the first user message repeated, so `name` is the one worth having.
+Most threads have none: 18 of 84 locally. It is opened with `immutable=1`, since Codex keeps the
+database in WAL mode and a plain read-only connection cannot create the shared-memory file while
+Codex holds it. Older layouts kept the same names in `session_index.jsonl`, which is the
+fallback.
+
+Unnamed threads take a title from their first real user turn — first *real*, because
 `# AGENTS.md instructions for ...` names no conversation.
 
 ### Generated preamble

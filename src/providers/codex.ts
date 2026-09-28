@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import { Glob } from "bun";
 import { PortError } from "../errors.ts";
 import { read as readRollout } from "./codex.rollout.ts";
-import { threadNames } from "./codex.index.ts";
+import { threadNames } from "./codex.names.ts";
 import type { Provider } from "./types.ts";
 
 /**

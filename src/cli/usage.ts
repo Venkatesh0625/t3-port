@@ -3,7 +3,7 @@ import { PROVIDERS } from "../providers/index.ts";
 export const USAGE = `t3-port — move conversation history into T3 Code
 
   t3-port doctor                    check this tool against the installed T3 Code
-  t3-port list                      sessions on disk, with their status in T3
+  t3-port list [term...]            sessions on disk, with their status in T3
   t3-port import [ref...]           import sessions as T3 threads (all importable if none named)
   t3-port runs                      import runs, newest first
   t3-port undo [run]                undo the newest import, or a named run
@@ -12,6 +12,10 @@ Providers (all unless named)
 ${PROVIDERS.map((p) => `  --${p.label.padEnd(18)} ${p.id}`).join("\n")}
 
 List
+  Terms filter by substring across agent, session id, project, directory and title. Every term
+  must match, so they narrow: "list codex xito" is Codex sessions under xito.
+
+  --sort <field>         recent (default), project, turns, agent or title
   --limit <n>            rows to show; 0 for all. Defaults to 40 in a terminal, all when piped
   --offset <n>           skip this many rows
 

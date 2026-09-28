@@ -14,6 +14,7 @@ const OPTIONS = {
   "force-project": { type: "boolean" },
   "create-project": { type: "boolean" },
   "drop-generated": { type: "boolean" },
+  sort: { type: "string" },
   limit: { type: "string" },
   offset: { type: "string" },
   force: { type: "boolean" },
