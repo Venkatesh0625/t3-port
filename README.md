@@ -22,7 +22,7 @@ bun run build                  # -> dist/t3-port (~55 MB)
 Or skip installing and run it in place:
 
 ```sh
-bun run src/cli.ts doctor
+bun run src/main.ts doctor
 ```
 
 ## Use
@@ -54,6 +54,23 @@ t3-port doctor && t3-port import --all
 | `T3CODE_HOME` | `~/.t3` |
 
 Point `T3CODE_HOME` at a copy of `~/.t3` to rehearse an import against a throwaway database.
+
+## Layout
+
+```
+src/
+  main.ts            entry point; dispatch only
+  cli/               argument parsing (node:util parseArgs), usage, session collection, output
+  commands/          one module per command
+  providers/         one module per agent, behind a common interface
+  ops/               planning and applying, provider-agnostic
+  t3/                event log, command builders, queries, schema guard
+```
+
+Everything that differs between agents lives in `providers/`: where transcripts are, how to
+read one, which session ids are resumable, the resume cursor shape, and whether the agent finds
+a transcript by directory. The planner, the queries and the CLI only see the interface, so a
+third agent is one new module plus a registry entry — its `--flag` and help text are generated.
 
 ## How it works
 

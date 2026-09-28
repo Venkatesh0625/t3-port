@@ -1,40 +1,22 @@
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
+import type { Provider } from "../providers/index.ts";
 import { latest } from "../time.ts";
 import type { Command, PlannedEvent } from "./eventlog.ts";
 
 /**
  * Command builders mirroring apps/server/src/orchestration/decider.ts.
  *
- * T3 normally turns a command into events inside its engine. We are writing to a closed
- * database with no engine running, so each builder reproduces one decider branch. Keeping
- * them named after the upstream commands makes the correspondence checkable when T3 changes.
+ * T3 normally turns a command into events inside its engine. We write to a closed database with
+ * no engine running, so each builder reproduces one decider branch. Keeping them named after
+ * the upstream commands makes the correspondence checkable when T3 changes.
  */
-
-export const CLAUDE_INSTANCE = "claudeAgent";
-export const CODEX_INSTANCE = "codex";
-
-/** Sessions T3 refuses to resume are not worth importing. (AgentSessionImporter.ts:32) */
-export const CLAUDE_SESSION_ID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const HISTORY_IMPORT = { historyImport: true } as const;
 
 /** `import:<providerInstanceId>:<providerSessionId>` (AgentSessionImporter.ts:168). */
-export function importedThreadId(sessionId: string, instance = CLAUDE_INSTANCE): string {
-  return `import:${instance}:${sessionId}`;
-}
-
-/**
- * The two providers' resume cursors are not the same shape.
- *
- * Claude resumes by session id passed to the Agent SDK, so the cursor carries both the T3
- * thread and the session. Codex resumes by its own thread id, and T3 stores only that
- * (AgentSessionImporter.ts:234). Writing Claude's shape for a Codex thread would leave the
- * session unresumable.
- */
-export function resumeCursor(provider: string, threadId: string, sessionId: string): unknown {
-  return provider === CODEX_INSTANCE ? { threadId: sessionId } : { threadId, resume: sessionId };
+export function importedThreadId(sessionId: string, providerId: string): string {
+  return `import:${providerId}:${sessionId}`;
 }
 
 /** `<threadId>:<index padded to 6>` (AgentSessionImporter.ts:267). */
@@ -54,10 +36,9 @@ export function threadCreate(input: {
   projectId: string;
   title: string;
   model: string;
-  instance?: string;
+  providerId: string;
   createdAt: string;
 }): Command {
-  const instance = input.instance ?? CLAUDE_INSTANCE;
   return {
     aggregateKind: "thread",
     streamId: input.threadId,
@@ -70,7 +51,7 @@ export function threadCreate(input: {
           threadId: input.threadId,
           projectId: input.projectId,
           title: input.title,
-          modelSelection: { instanceId: instance, model: input.model },
+          modelSelection: { instanceId: input.providerId, model: input.model },
           runtimeMode: "full-access",
           interactionMode: "default",
           branch: null,
@@ -85,7 +66,8 @@ export function threadCreate(input: {
 
 /**
  * decider.ts "thread.history.import" (decider.ts:2003) — one thread.message-sent per message,
- * then a single thread.settled dated to the newest of them.
+ * then a single thread.settled dated to the newest of them. Backfilling these is what makes an
+ * imported conversation visible; the resume cursor alone leaves the thread empty.
  */
 export function threadHistoryImport(threadId: string, messages: readonly ImportMessage[]): Command {
   const first = messages[0];
@@ -107,10 +89,7 @@ export function threadHistoryImport(threadId: string, messages: readonly ImportM
     },
   }));
 
-  const settledAt = latest(
-    messages.map((m) => m.createdAt),
-    first.createdAt,
-  );
+  const settledAt = latest(messages.map((m) => m.createdAt), first.createdAt);
   events.push({
     type: "thread.settled",
     occurredAt: settledAt,
@@ -119,6 +98,15 @@ export function threadHistoryImport(threadId: string, messages: readonly ImportM
   });
 
   return { aggregateKind: "thread", streamId: threadId, events };
+}
+
+/** decider.ts "thread.delete" */
+export function threadDelete(threadId: string, at: string): Command {
+  return {
+    aggregateKind: "thread",
+    streamId: threadId,
+    events: [{ type: "thread.deleted", occurredAt: at, payload: { threadId, deletedAt: at } }],
+  };
 }
 
 /** decider.ts "project.create" */
@@ -162,15 +150,15 @@ export interface TranscriptSource {
 }
 
 /**
- * The resume cursor is what makes an imported thread continue the real Claude session rather
- * than start a new one: the adapter passes `resume` straight to the Agent SDK.
- * Inserted with ON CONFLICT DO NOTHING so a live binding is never displaced
- * (AgentSessionImporter.ts:225 makes the same choice).
+ * Bind a thread to the provider session it resumes.
+ *
+ * Inserted with ON CONFLICT DO NOTHING so a live binding is never displaced — the same choice
+ * AgentSessionImporter.ts:225 makes, for the same reason.
  */
 export function bindSession(
   db: Database,
   input: {
-    provider: string;
+    provider: Provider;
     threadId: string;
     sessionId: string;
     cwd: string;
@@ -178,6 +166,7 @@ export function bindSession(
     now: string;
   },
 ): void {
+  const { provider } = input;
   db.run(
     `INSERT INTO provider_session_runtime
        (thread_id, provider_name, provider_instance_id, adapter_key, runtime_mode, status,
@@ -186,17 +175,17 @@ export function bindSession(
      ON CONFLICT (thread_id) DO NOTHING`,
     [
       input.threadId,
-      input.provider,
-      input.provider,
-      input.provider,
+      provider.id,
+      provider.id,
+      provider.id,
       input.now,
-      JSON.stringify(resumeCursor(input.provider, input.threadId, input.sessionId)),
+      JSON.stringify(provider.resumeCursor(input.threadId, input.sessionId)),
       JSON.stringify({
         cwd: input.cwd,
         importedTranscripts: [
           {
-            provider: input.provider,
-            providerInstanceId: input.provider,
+            provider: provider.id,
+            providerInstanceId: provider.id,
             providerSessionId: input.sessionId,
             filePath: input.source.filePath,
             size: input.source.size,

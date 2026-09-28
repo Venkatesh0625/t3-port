@@ -3,7 +3,7 @@
 set -uo pipefail
 
 SB=/tmp/t3-port-e2e
-CLI="bun run $(cd "$(dirname "$0")" && pwd)/src/cli.ts"
+CLI="bun run $(cd "$(dirname "$0")" && pwd)/src/main.ts"
 PASS=0; FAIL=0
 
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; PASS=$((PASS+1)); }

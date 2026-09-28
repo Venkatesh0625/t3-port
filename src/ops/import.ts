@@ -1,21 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { resolve as resolvePath, sep } from "node:path";
-import type { SessionStore } from "../claude/store.ts";
-import { FALLBACK_MODEL as CLAUDE_MODEL } from "../claude/transcript.ts";
-import { FALLBACK_MODEL as CODEX_MODEL } from "../codex/rollout.ts";
+import type { Config } from "../config.ts";
+import { byId, type Provider } from "../providers/index.ts";
 import { hasUserTurn, type Session } from "../session.ts";
-import { impliedRepoName, repoRootOf } from "../claude/worktree.ts";
 import { nowIso } from "../time.ts";
-import {
-  CLAUDE_INSTANCE,
-  CLAUDE_SESSION_ID,
-  CODEX_INSTANCE,
-  bindSession,
-  importedThreadId,
-  projectCreate,
-  threadCreate,
-  threadHistoryImport,
-} from "../t3/commands.ts";
+import { impliedRepoName, repoRootOf } from "../worktree.ts";
+import { bindSession, importedThreadId, projectCreate, threadCreate, threadHistoryImport } from "../t3/commands.ts";
 import { EventLog } from "../t3/eventlog.ts";
 import { importedSessionIds, nativeSessionIds, projects, type Project } from "../t3/queries.ts";
 
@@ -27,12 +17,22 @@ export type SkipReason =
   | "no-project"
   | "other-project";
 
+/** A project that does not exist yet. */
+export interface NewProject {
+  readonly create: true;
+  readonly workspaceRoot: string;
+  readonly title: string;
+}
+
+export type Target = Project | NewProject;
+export const isNew = (target: Target): target is NewProject => "create" in target;
+
 export interface Planned {
   readonly session: Session;
-  readonly project: Project | { create: true; workspaceRoot: string; title: string };
+  readonly target: Target;
   readonly threadId: string;
-  /** True when the transcript must be copied so `claude --resume` finds it at the project root. */
-  readonly needsCopy: boolean;
+  /** The transcript must be placed at the project root for the agent to find it there. */
+  readonly needsPlacing: boolean;
 }
 
 export interface Skipped {
@@ -52,7 +52,7 @@ export interface PlanOptions {
    * Restrict the import to one project, by id, title, or workspace root.
    *
    * This filters rather than redirects: a session is imported only when its own working
-   * directory falls under the named project. Redirecting every session into one project is a
+   * directory falls under the named project. Redirecting everything into one project is a
    * separate, explicit choice — see `forceProject`.
    */
   readonly project?: string;
@@ -64,6 +64,10 @@ export interface PlanOptions {
 const under = (child: string, parent: string): boolean =>
   child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
 
+const nameOf = (path: string): string => path.split(sep).pop() || path;
+
+const expand = (path: string): string => resolvePath(path.replace(/^~/, process.env.HOME ?? "~"));
+
 /** The most specific project directly containing a directory. */
 function directlyEnclosing(all: readonly Project[], cwd: string): Project | null {
   const hits = all.filter((p) => under(cwd, p.workspaceRoot));
@@ -74,8 +78,8 @@ function directlyEnclosing(all: readonly Project[], cwd: string): Project | null
 /**
  * The project owning a session's directory, following a worktree back to its repository.
  *
- * Only git is trusted here: a live worktree resolves to its real main checkout. A deleted one
- * can only be guessed from the path shape, which is offered as a suggestion instead.
+ * Only git is trusted: a live worktree resolves to its real main checkout. A deleted one can
+ * only be guessed from the path shape, which becomes a suggestion instead.
  */
 function enclosing(all: readonly Project[], cwd: string): Project | null {
   const direct = directlyEnclosing(all, cwd);
@@ -89,47 +93,35 @@ function suggestFor(all: readonly Project[], cwd: string | null): string | undef
   if (!cwd) return undefined;
   const name = impliedRepoName(cwd);
   if (!name) return undefined;
-  const matches = all.filter((p) => p.workspaceRoot.split(sep).pop() === name);
+  const matches = all.filter((p) => nameOf(p.workspaceRoot) === name);
   return matches.length === 1 ? matches[0]!.workspaceRoot : undefined;
 }
 
-const expand = (path: string): string => resolvePath(path.replace(/^~/, process.env.HOME ?? "~"));
-
-function named(all: readonly Project[], ref: string): Project | { workspaceRoot: string } {
-  const root = expand(ref);
-  return (
-    all.find((p) => p.id === ref || p.title === ref || p.workspaceRoot === root) ?? { workspaceRoot: root }
-  );
-}
-
-function asNew(workspaceRoot: string): Planned["project"] {
-  return { create: true, workspaceRoot, title: workspaceRoot.split(sep).pop() || workspaceRoot };
-}
-
-function targetProject(
+function targetFor(
   all: readonly Project[],
   session: Session,
   options: PlanOptions,
-): Planned["project"] | "out-of-scope" | null {
+): Target | "out-of-scope" | null {
   if (options.project) {
-    const target = named(all, options.project);
+    const root = expand(options.project);
+    const named =
+      all.find((p) => p.id === options.project || p.title === options.project || p.workspaceRoot === root) ??
+      null;
+    const workspaceRoot = named?.workspaceRoot ?? root;
 
-    // Explicit redirect: every session goes here, wherever it ran.
-    if (options.forceProject) {
-      if ("id" in target) return target;
-      return options.createProject ? asNew(target.workspaceRoot) : null;
+    if (!options.forceProject && (!session.cwd || !under(session.cwd, workspaceRoot))) {
+      return "out-of-scope";
     }
-
-    // Default: a named project scopes the import to sessions that actually ran under it.
-    if (!session.cwd || !under(session.cwd, target.workspaceRoot)) return "out-of-scope";
-    if ("id" in target) return target;
-    return options.createProject ? asNew(target.workspaceRoot) : null;
+    if (named) return named;
+    return options.createProject ? { create: true, workspaceRoot, title: nameOf(workspaceRoot) } : null;
   }
 
   if (!session.cwd) return null;
   const found = enclosing(all, session.cwd);
   if (found) return found;
-  return options.createProject ? asNew(session.cwd) : null;
+  return options.createProject
+    ? { create: true, workspaceRoot: session.cwd, title: nameOf(session.cwd) }
+    : null;
 }
 
 interface Known {
@@ -137,13 +129,8 @@ interface Known {
   readonly imported: ReadonlySet<string>;
 }
 
-function classify(session: Session, known: Known, worktrees: string): SkipReason | null {
-  // T3 refuses to resume a session id it cannot parse, so importing one would strand the thread.
-  if (!session.sessionId) return "unresumable-session-id";
-  // T3 refuses Claude ids it cannot parse; Codex ids come from metadata and are taken as given.
-  if (session.provider === CLAUDE_INSTANCE && !CLAUDE_SESSION_ID.test(session.sessionId)) {
-    return "unresumable-session-id";
-  }
+function classify(session: Session, provider: Provider, known: Known, worktrees: string): SkipReason | null {
+  if (!provider.isResumable(session.sessionId)) return "unresumable-session-id";
   if (!hasUserTurn(session)) return "no-user-turn";
   if (known.imported.has(session.sessionId)) return "already-imported";
   if (known.native.has(session.sessionId)) return "t3-native";
@@ -158,44 +145,48 @@ export function plan(
   worktrees: string,
 ): Plan {
   const all = projects(db);
-  // Each provider has its own id space and its own cursor shape, so look them up separately.
+  // Each provider has its own id space and cursor shape, so look them up separately.
   const cache = new Map<string, Known>();
-  const known = (provider: string): Known => {
-    let entry = cache.get(provider);
+  const known = (provider: Provider): Known => {
+    let entry = cache.get(provider.id);
     if (!entry) {
       entry = { native: nativeSessionIds(db, provider), imported: importedSessionIds(db, provider) };
-      cache.set(provider, entry);
+      cache.set(provider.id, entry);
     }
     return entry;
   };
+
   const planned: Planned[] = [];
   const skipped: Skipped[] = [];
   const seen = new Set<string>();
 
   for (const session of sessions) {
-    if (seen.has(session.sessionId)) continue;
-    seen.add(session.sessionId);
+    const provider = byId(session.provider);
+    const key = `${provider.id}:${session.sessionId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
-    const reason = classify(session, known(session.provider), worktrees);
+    const reason = classify(session, provider, known(provider), worktrees);
     if (reason) {
       skipped.push({ session, reason });
       continue;
     }
-    const project = targetProject(all, session, options);
-    if (project === "out-of-scope") {
+
+    const target = targetFor(all, session, options);
+    if (target === "out-of-scope") {
       skipped.push({ session, reason: "other-project" });
       continue;
     }
-    if (!project) {
+    if (!target) {
       skipped.push({ session, reason: "no-project", suggestion: suggestFor(all, session.cwd) });
       continue;
     }
-    const root = "create" in project ? project.workspaceRoot : project.workspaceRoot;
+
     planned.push({
       session,
-      project,
-      threadId: importedThreadId(session.sessionId, session.provider),
-      needsCopy: session.provider === CLAUDE_INSTANCE && session.cwd !== root,
+      target,
+      threadId: importedThreadId(session.sessionId, provider.id),
+      needsPlacing: provider.locationAddressed && session.cwd !== target.workspaceRoot,
     });
   }
   return { planned, skipped };
@@ -206,51 +197,48 @@ export interface Imported {
   readonly title: string;
   readonly turns: number;
   readonly workspaceRoot: string;
-  readonly copiedTo: string | null;
+  readonly placedAt: string | null;
 }
 
 /**
  * Apply a plan in one transaction.
  *
  * Order matters: the resume cursor goes in before the thread's events, so a thread is never
- * visible without the binding that lets it continue its Claude session.
+ * visible without the binding that lets it continue its session.
  */
-export function apply(db: Database, store: SessionStore, plan: Plan, now = nowIso()): Imported[] {
+export function apply(db: Database, config: Config, plan: Plan, now = nowIso()): Imported[] {
   const log = new EventLog(db);
   const created = new Map<string, Project>();
   const results: Imported[] = [];
 
   db.transaction(() => {
     for (const item of plan.planned) {
+      const provider = byId(item.session.provider);
+
       let project: Project;
-      if ("create" in item.project) {
-        const key = item.project.workspaceRoot;
-        const existing = created.get(key);
+      if (isNew(item.target)) {
+        const existing = created.get(item.target.workspaceRoot);
         if (existing) {
           project = existing;
         } else {
           const { projectId, command } = projectCreate({
-            title: item.project.title,
-            workspaceRoot: key,
+            title: item.target.title,
+            workspaceRoot: item.target.workspaceRoot,
             now,
           });
           log.append(command);
-          project = { id: projectId, title: item.project.title, workspaceRoot: key };
-          created.set(key, project);
+          project = { id: projectId, title: item.target.title, workspaceRoot: item.target.workspaceRoot };
+          created.set(project.workspaceRoot, project);
         }
       } else {
-        project = item.project;
+        project = item.target;
       }
 
       const { session, threadId } = item;
-      // Only Claude finds a transcript by directory; Codex rollouts are addressed by id.
-      const copiedTo =
-        item.needsCopy && session.provider === CLAUDE_INSTANCE
-          ? store.copyUnder(session.path, project.workspaceRoot)
-          : null;
+      const placedAt = item.needsPlacing ? provider.place(config, session.path, project.workspaceRoot) : null;
 
       bindSession(db, {
-        provider: session.provider,
+        provider,
         threadId,
         sessionId: session.sessionId,
         cwd: project.workspaceRoot,
@@ -264,15 +252,14 @@ export function apply(db: Database, store: SessionStore, plan: Plan, now = nowIs
         now,
       });
 
-      const openedAt = session.turns[0]!.createdAt;
       log.append(
         threadCreate({
           threadId,
           projectId: project.id,
           title: session.title,
-          model: session.model ?? (session.provider === CODEX_INSTANCE ? CODEX_MODEL : CLAUDE_MODEL),
-          instance: session.provider,
-          createdAt: openedAt,
+          model: session.model ?? provider.fallbackModel,
+          providerId: provider.id,
+          createdAt: session.turns[0]!.createdAt,
         }),
       );
       log.append(threadHistoryImport(threadId, session.turns));
@@ -282,7 +269,7 @@ export function apply(db: Database, store: SessionStore, plan: Plan, now = nowIs
         title: session.title,
         turns: session.turns.length,
         workspaceRoot: project.workspaceRoot,
-        copiedTo,
+        placedAt,
       });
     }
   })();

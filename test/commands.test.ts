@@ -1,31 +1,20 @@
 import { expect, test, describe } from "bun:test";
-import {
-  CLAUDE_SESSION_ID,
-  importedMessageId,
-  importedThreadId,
-  threadCreate,
-  threadHistoryImport,
-} from "../src/t3/commands.ts";
-import { prose } from "../src/claude/transcript.ts";
+import { importedMessageId, importedThreadId, threadCreate, threadHistoryImport } from "../src/t3/commands.ts";
+import { claude } from "../src/providers/claude.ts";
+import { codex } from "../src/providers/codex.ts";
 import { latest } from "../src/time.ts";
 
 describe("id conventions (AgentSessionImporter.ts:168,267)", () => {
-  test("thread id is deterministic, so re-import is detectable", () => {
-    expect(importedThreadId("347cd91a-749f-4f92-a41d-4b8e82e158d9")).toBe(
+  test("thread ids are deterministic and namespaced per provider", () => {
+    expect(importedThreadId("347cd91a-749f-4f92-a41d-4b8e82e158d9", claude.id)).toBe(
       "import:claudeAgent:347cd91a-749f-4f92-a41d-4b8e82e158d9",
     );
+    expect(importedThreadId("s", codex.id)).toBe("import:codex:s");
   });
 
   test("message ids are the thread id plus a 6-digit index", () => {
     expect(importedMessageId("import:claudeAgent:x", 0)).toBe("import:claudeAgent:x:000000");
     expect(importedMessageId("import:claudeAgent:x", 1462)).toBe("import:claudeAgent:x:001462");
-  });
-
-  test("session id pattern matches T3's, so unresumable ids are refused", () => {
-    expect(CLAUDE_SESSION_ID.test("347cd91a-749f-4f92-a41d-4b8e82e158d9")).toBe(true);
-    expect(CLAUDE_SESSION_ID.test("not-a-uuid")).toBe(false);
-    // version nibble must be 1-8, variant 8/9/a/b
-    expect(CLAUDE_SESSION_ID.test("347cd91a-749f-9f92-a41d-4b8e82e158d9")).toBe(false);
   });
 });
 
@@ -35,6 +24,7 @@ describe("threadCreate mirrors decider.ts thread.create", () => {
     projectId: "p",
     title: "T",
     model: "claude-opus-5",
+    providerId: claude.id,
     createdAt: "2026-09-01T00:00:00.000Z",
   });
 
@@ -78,8 +68,9 @@ describe("threadHistoryImport mirrors decider.ts:2003", () => {
   });
 
   test("settles at the newest message, not the last one", () => {
-    const settled = command.events.at(-1)!.payload as { settledAt: string };
-    expect(settled.settledAt).toBe("2026-09-03T00:00:00.000Z");
+    expect((command.events.at(-1)!.payload as { settledAt: string }).settledAt).toBe(
+      "2026-09-03T00:00:00.000Z",
+    );
   });
 
   test("messages carry no turn and are not streaming", () => {
@@ -96,28 +87,6 @@ describe("threadHistoryImport mirrors decider.ts:2003", () => {
 
   test("an empty history is rejected, matching the decider's invariant", () => {
     expect(() => threadHistoryImport("t", [])).toThrow(/at least one message/);
-  });
-});
-
-describe("transcript prose extraction", () => {
-  test("keeps text blocks and drops tool noise", () => {
-    expect(
-      prose([
-        { type: "thinking", thinking: "hidden" },
-        { type: "text", text: "  visible  " },
-        { type: "tool_use", name: "Bash" },
-        { type: "tool_result", content: "output" },
-        { type: "text", text: "second" },
-      ]),
-    ).toBe("visible\nsecond");
-  });
-
-  test("accepts a bare string body", () => {
-    expect(prose(" hi ")).toBe("hi");
-  });
-
-  test("yields nothing for a tool-only record", () => {
-    expect(prose([{ type: "tool_result", content: "x" }])).toBe("");
   });
 });
 

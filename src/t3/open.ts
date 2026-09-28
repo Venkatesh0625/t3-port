@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { PortError, type Config } from "../config.ts";
+import type { Config } from "../config.ts";
+import { PortError } from "../errors.ts";
 import { liveServer } from "../proc.ts";
 import { checkCompatibility, type Compatibility } from "./schema.ts";
 

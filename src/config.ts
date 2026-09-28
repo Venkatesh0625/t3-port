@@ -23,9 +23,3 @@ export function loadConfig(
     worktrees: join(t3Home, "worktrees"),
   };
 }
-
-export class PortError extends Error {
-  static is(e: unknown): e is PortError {
-    return e instanceof PortError;
-  }
-}
