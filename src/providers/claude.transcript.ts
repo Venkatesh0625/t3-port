@@ -1,7 +1,8 @@
 import { statSync } from "node:fs";
+import { TooLarge } from "../errors.ts";
 import { basename } from "node:path";
 import { isoFromMs, isoOr } from "../time.ts";
-import { deriveTitle, type Session, type Turn } from "../session.ts";
+import { deriveTitle, MAX_TRANSCRIPT_BYTES, type Session, type Turn } from "../session.ts";
 
 /**
  * Read a Claude Code transcript.
@@ -42,6 +43,7 @@ function isNoise(record: Record<string, unknown>): boolean {
 
 export async function read(path: string): Promise<Session> {
   const st = statSync(path);
+  if (st.size > MAX_TRANSCRIPT_BYTES) throw new TooLarge(path, st.size);
   const fallbackTime = isoFromMs(st.mtimeMs);
 
   let sessionId = basename(path).replace(/\.jsonl$/, "");

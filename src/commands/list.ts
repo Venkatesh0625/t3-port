@@ -1,5 +1,5 @@
 import { loadConfig } from "../config.ts";
-import type { Args } from "../cli/args.ts";
+import { requireScope, type Args } from "../cli/args.ts";
 import { collectAll } from "../cli/sessions.ts";
 import { sessionHeader, sessionLine, type Listed } from "../cli/report.ts";
 import { matches } from "../cli/filter.ts";
@@ -8,6 +8,8 @@ import { parseSort, sortRows } from "../cli/sort.ts";
 import { PortError } from "../errors.ts";
 import { enclosing } from "../ops/locate.ts";
 import { color } from "../cli/color.ts";
+import { tooLargeNote } from "../cli/report.ts";
+import { shortPath } from "../cli/paths.ts";
 import { open } from "../t3/open.ts";
 import { importedSessionIds, nativeSessionIds, projects } from "../t3/queries.ts";
 
@@ -23,9 +25,10 @@ function positiveInt(value: string | boolean | undefined, name: string, fallback
 
 export async function list(args: Args): Promise<number> {
   const config = loadConfig();
+  const scope = requireScope(args);
   const { db } = open(config, { write: false });
 
-  const sessions = await collectAll(config, args.providers, {});
+  const { sessions, skipped } = await collectAll(config, args.providers, {}, scope);
   const all = projects(db);
   const known = new Map(
     args.providers.map((p) => [p.id, { native: nativeSessionIds(db, p), imported: importedSessionIds(db, p) }]),
@@ -58,11 +61,18 @@ export async function list(args: Args): Promise<number> {
   const page = limit === 0 ? found.slice(offset) : found.slice(offset, offset + limit);
 
   const shown = page.length === 0 ? "none" : `${offset + 1}–${offset + page.length}`;
-  const scope = terms.length > 0 ? ` matching ${terms.map((t) => `"${t}"`).join(" ")}` : "";
+  const matching = terms.length > 0 ? ` matching ${terms.map((t) => `"${t}"`).join(" ")}` : "";
   const of = terms.length > 0 ? color.dim(` of ${rows.length}`) : "";
-  console.log(`${color.bold(String(found.length))} session(s)${scope}${of}, showing ${shown}\n`);
-  // Width is computed over everything listed, so an id stays unique as pages change.
-  const id = abbreviate(found.map((r) => r.session.sessionId));
+  console.log(
+    `${color.bold(String(found.length))} session(s)${matching}${of} in ` +
+      `${color.cyan(shortPath(scope.root, 48))}, showing ${shown}\n`,
+  );
+  // Width comes from every session, not the filtered ones: an id printed here is meant to be
+  // handed back to `import`, which resolves against all of them. Narrowing the input would let
+  // a filter print a prefix that is unique on screen and ambiguous everywhere else.
+  const id = abbreviate(rows.map((r) => r.session.sessionId));
+  const note = tooLargeNote(skipped);
+  if (note) console.log(note);
   console.log(sessionHeader(id.width));
   for (const row of page) console.log(sessionLine(row, (s) => labelOf(s.provider), id.of));
 

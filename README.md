@@ -5,24 +5,13 @@ threads that resume the original provider session. Bun + TypeScript, no dependen
 
 ## Install
 
-Not published to npm, and it could not run under Node as written — it uses `bun:sqlite`,
-`Bun.spawnSync`, `Bun.CryptoHasher` and `Bun.file`. Bun is required.
+Bun is required — this uses `bun:sqlite`, `Bun.spawnSync`, `Bun.CryptoHasher` and `Bun.file`,
+so it will not run under Node.
 
 ```sh
-cd t3-port && bun install
+bun install
 bun link                       # puts `t3-port` on your PATH
-```
-
-Or build a standalone binary with the runtime embedded, for a machine without Bun:
-
-```sh
-bun run build                  # -> dist/t3-port (~55 MB)
-```
-
-Or skip installing and run it in place:
-
-```sh
-bun run src/main.ts doctor
+bun run build                  # or a standalone binary at dist/t3-port
 ```
 
 ## Use
@@ -30,27 +19,21 @@ bun run src/main.ts doctor
 ```sh
 t3-port doctor                 # is this tool safe against your installed T3?
 t3-port list                   # sessions on disk, marked t3 / imported / -
-t3-port list --codex --limit 0 # one provider, no paging
-t3-port list web-app deploy    # filter by any word: agent, id, project, directory or title
-t3-port list --sort project    # group by project
 t3-port import --dry-run       # plan; no references means every importable session
 t3-port import                 # write (quit T3 Code first)
 t3-port runs                   # import runs, newest first
 t3-port undo                   # take the newest import back
-t3-port undo d03f8e72          # or a specific run
-
-t3-port import --codex --drop-generated   # one provider
-t3-port import 347cd91a                   # one session, by id prefix
-t3-port import --project ~/personal/app   # only sessions that ran under this project
 ```
 
-`doctor` exits 1 when T3's schema has drifted, so it works in a script:
+Narrow any of it:
 
 ```sh
-t3-port doctor && t3-port import --all
+t3-port list --path ~/code/web-app      # a checkout and the worktrees made from it
+t3-port list web-app deploy             # filter by word: agent, id, project, directory, title
+t3-port list --sort project             # group by project
+t3-port import --codex --drop-generated # one provider
+t3-port import 347cd91a                 # one session, by id prefix
 ```
-
-### Environment
 
 | Variable | Default |
 | --- | --- |
@@ -58,24 +41,7 @@ t3-port doctor && t3-port import --all
 | `CODEX_HOME` | `~/.codex` |
 | `T3CODE_HOME` | `~/.t3` |
 
-Point `T3CODE_HOME` at a copy of `~/.t3` to rehearse an import against a throwaway database.
-
-## Layout
-
-```
-src/
-  main.ts            entry point; dispatch only
-  cli/               argument parsing (node:util parseArgs), usage, session collection, output
-  commands/          one module per command
-  providers/         one module per agent, behind a common interface
-  ops/               planning and applying, provider-agnostic
-  t3/                event log, command builders, queries, schema guard
-```
-
-Everything that differs between agents lives in `providers/`: where transcripts are, how to
-read one, which session ids are resumable, the resume cursor shape, and whether the agent finds
-a transcript by directory. The planner, the queries and the CLI only see the interface, so a
-third agent is one new module plus a registry entry — its `--flag` and help text are generated.
+Point `T3CODE_HOME` at a copy of `~/.t3` to rehearse against a throwaway database.
 
 ## How it works
 
@@ -89,185 +55,48 @@ An import writes three things:
 2. **A `thread.history.import` command** → one `thread.message-sent` per turn, then one
    `thread.settled` dated to the newest turn. This is what makes the conversation *visible*;
    without it the thread renders empty.
-3. **A `provider_session_runtime` row** whose `resume_cursor_json` is
-   `{threadId, resume: <claude session uuid>}`. The Claude adapter passes `resume` to the Agent
-   SDK, so the next message continues the real session with full model context.
+3. **A `provider_session_runtime` row** whose resume cursor points at the original session, so
+   the next message continues it with full model context.
 
-Every event is tagged `metadata_json = {"historyImport": true}`, and the cursor is written before
-the thread's events so a thread is never visible without the binding that lets it continue.
+Every event is tagged `metadata_json = {"historyImport": true}`, and the cursor is written
+before the thread's events so a thread is never visible without the binding that lets it
+continue.
 
-Thread ids are deterministic — `import:claudeAgent:<sessionId>`, with message ids
+Thread ids are deterministic — `import:<provider>:<sessionId>`, with message ids
 `<threadId>:<index padded to 6>`. That makes "already imported?" a prefix scan over the event
-log, with no bookkeeping table, and it matches T3's own convention so T3 recognises these threads
-as imports and never duplicates them.
+log, and it matches T3's own convention, so T3 recognises these threads as imports.
 
-### Derived from
-
-Command shapes come from T3's own source, not from guessing:
+Command shapes come from T3's source rather than guesswork:
 
 | What | Where |
 | --- | --- |
-| Thread and message id format, resume cursor | `apps/server/src/project/AgentSessionImporter.ts:147,168,234,267` |
-| `thread.history.import` → message-sent + settled | `apps/server/src/orchestration/decider.ts:2003-2073` |
-| `attachments` / `context` optional on messages | `packages/contracts/src/orchestration.ts:1912` |
-| Session ids T3 can resume | `apps/server/src/project/AgentSessionImporter.ts:32` |
+| Thread and message id format, resume cursor | `AgentSessionImporter.ts:147,168,234,267` |
+| `thread.history.import` → message-sent + settled | `decider.ts:2003-2073` |
+| `attachments` / `context` optional on messages | `contracts/orchestration.ts:1912` |
 
-## Listing
+**T3 Code must be quit before writing.** Its live projection path advances a shared cursor to
+the sequence of the event it just handled, without checking for rows in between — so events
+written underneath a running T3 are stepped over and never projected, and no restart recovers
+them. The tool refuses to write while the server is up, detected with `ps` rather than `/proc`,
+which does not exist on macOS.
 
-```
-510 session(s), showing 1–40
-
-          agent  session   turns  project                     title
--         codex  01a0e776-e594   12  ~/code/web-app             deploy-preview-cleanup
-imported  claude 6ac97664      475  ~/code/web-app             Migrate the worker to R2
--         codex  01a0c0be-7a10   97  …/worktrees/quiet-harbour  Retry the failing seed
-```
-
-The project column is the project a session would import into, resolved exactly the way
-`import` resolves it — including following a worktree back to its repository — so the two can
-never disagree. A session no project covers shows the directory it ran in instead, dimmed, since
-that is usually why it is unplaced.
-
-Positional terms filter by substring across the agent, session id, project, working directory
-and title. Every term must match, so they narrow: `list codex web-app` is Codex sessions in web-app.
-
-`--sort` takes `recent` (default), `project`, `turns`, `agent` or `title`. Grouped orderings put
-the largest conversation first inside each group, since a group exists to be scanned and the long
-conversations are the ones worth finding.
-
-Session ids are abbreviated to the shortest width that keeps them unique, like git's short
-hashes, and what is printed can be pasted straight into `import`. A fixed eight characters would
-be wrong: Codex ids are UUIDv7, whose first 48 bits are a millisecond timestamp, so sessions
-started moments apart share a prefix — 25 of 78 local rollouts collided at eight.
-
-A terminal gets 40 rows; piped output is never truncated and carries no escape codes, so
-`| grep` and `| wc -l` work. `--limit` and `--offset` override, and `--limit 0` means all.
-Colour follows NO_COLOR and FORCE_COLOR.
-
-## Codex
-
-Codex differs from Claude in every way that matters, so the reader is separate:
-
-| | Claude Code | Codex |
-| --- | --- | --- |
-| Location | `~/.claude/projects/<slugged cwd>/` | `~/.codex/sessions/<y>/<m>/<d>/` |
-| Session id | the filename | only inside `session_meta` |
-| Working directory | the directory name | only inside `session_meta` |
-| Turns | `user` / `assistant` records | `response_item` with `input_text` / `output_text` |
-| Resume cursor | `{threadId, resume: <session>}` | `{threadId: <session>}` |
-
-That last row is the one that silently breaks things: writing Claude's cursor shape for a Codex
-thread leaves the session unresumable.
-
-### Thread names
-
-A rollout records the conversation but never its name. The authoritative store is
-`~/.codex/state_<n>.sqlite`, whose `threads` table holds a short `name` — its `title` and
-`preview` columns are only the first user message repeated, so `name` is the one worth having.
-Most threads have none: 18 of 84 locally. It is opened with `immutable=1`, since Codex keeps the
-database in WAL mode and a plain read-only connection cannot create the shared-memory file while
-Codex holds it. Older layouts kept the same names in `session_index.jsonl`, which is the
-fallback.
-
-Unnamed threads take a title from their first real user turn — first *real*, because
-`# AGENTS.md instructions for ...` names no conversation.
-
-### Generated preamble
-
-Codex injects its own text as user turns — the AGENTS.md header, `<environment_context>`,
-`<turn_aborted>`. T3 removes these only when an `event_msg` copy of the real prompt proves which
-text in a turn the user actually submitted, and keeps everything otherwise rather than risk
-deleting real user text. This reproduces that rule exactly.
-
-In practice that rule rarely fires: across 78 local rollouts only 1 contained any `event_msg`
-user message, so 43 of 73 sessions would be titled `# AGENTS.md instructions for ...`. Pass
-`--drop-generated` to filter the known preambles instead. It stays opt-in, and the plan reports
-how many turns it would affect.
-
-## Imported threads arrive settled
-
-That is T3's own behaviour, not a choice made here: its `thread.history.import` command emits a
-`thread.settled` event after the messages, dated to the newest one (`decider.ts:2053`). Imported
-conversations are history, so they stay out of the active list. Un-settle one from the thread
-menu to bring it back.
-
-## Sessions that are still running
-
-An import is a snapshot, and a session that is still being written to will outgrow it. The
-thread keeps the resume cursor, so continuing it in T3 gives the model the whole conversation
-while the thread shows only what existed at import time — and nothing reconciles the two, since
-the session is by then marked imported. Measured on a real transcript: 866 turns on disk, 864 in
-T3, no way to catch up.
-
-So a transcript touched within the last two minutes is skipped, and says so. `--include-live`
-overrides it. Quit the agent first if you want the whole conversation.
-
-## What it does not import
-
-Text turns only. Tool calls, reasoning blocks, and attachments are dropped — in a representative
-transcript, 91 of 97 `user` records were `tool_result`. The resumed session still has the full
-context, so the model remembers more than the thread displays.
-
-## Safety
-
-**T3 Code must be closed.** It only reads new events at startup, and a malformed event would stop
-it booting. The tool refuses to write while the server is live, detected with `ps` rather than
-`/proc` — `/proc` does not exist on macOS, so a `/proc`-based check reports "nothing running" on
-every Mac and fails open exactly when it matters.
-
-**Compatibility is structural, not a version number.** T3's migration id rises for changes that
-have nothing to do with this tool: 53 (`PullRequestFilesViewed`) and 54
-(`ProjectionThreadsAutoSettleDisabledAt`) both bumped it without touching anything written here.
-Instead, `doctor` hashes the DDL of the six tables in the write surface and compares against a
-baseline. A migration bump that leaves those unchanged is reported as safe; a changed table is a
-hard stop until the event shapes are re-verified. `--force` overrides.
-
-**A backup is taken before every write**, via `VACUUM INTO` so it reflects committed state
-including the WAL. Restore it if T3 refuses to boot.
-
-## Verified against
-
-T3 Code `0.0.43-nightly.20260928.2375`, schema migration 54, macOS.
-
-29 sessions imported into a copy of a real 294 MB `state.sqlite`, then checked:
-`thread.created` and `thread.settled` payload keys identical to T3's own events; `stream_version`
-contiguous from 0 on every stream; no orphan events or dangling receipts; one resume cursor per
-thread; re-running reports 0 to import.
-
-## Scope
-
-Implemented: `doctor`, `list`, `import`. Export (T3 threads → `claude --resume`) and sync are not
-built yet.
+**Compatibility is structural.** T3's migration id rises for changes that have nothing to do
+with this tool, so `doctor` hashes the DDL of the six tables actually written and compares
+against a baseline. A migration that leaves them alone is reported safe; a changed table stops
+writes until the event shapes are re-verified. `--force` overrides, and a backup is taken before
+every write.
 
 ## Testing
 
 ```sh
-bun test      # unit tests for the id conventions, command shapes and provider rules
+bun test      # unit tests
 ./e2e.sh      # end-to-end against a throwaway copy of the live state
 ```
 
-`e2e.sh` builds a sandbox from the most recent pre-import backup plus copies of both provider
-homes, then exercises every command for both providers and asserts on the resulting event log:
-cursor shapes per provider, no `stream_version` gaps, a receipt per event, one settled event per
-thread, no stream created twice, idempotent re-import, undo finality, and each guard. It writes
-nothing outside `/tmp/t3-port-e2e`.
+`e2e.sh` builds a sandbox from the most recent backup plus copies of both provider homes, runs
+every command for both providers, and asserts on the resulting event log. It writes nothing
+outside `/tmp/t3-port-e2e`.
 
-## Undo is a stack
+## Licence
 
-Every import is one run, tied together by the correlation id its events share — a column T3
-fills with the command id and never reads back, so marking a run needs no table of our own and
-no unknown keys in T3's event metadata, which is a closed schema.
-
-`t3-port runs` lists them and `t3-port undo` pops the newest, or a named one. What that does
-depends on whether T3 has folded the run into its projections, which `runs` reports:
-
-| State | Undo |
-| --- | --- |
-| **not yet read** — T3 has not started since the import | the run is lifted out entirely: events, receipts, bindings, and any project it created and nothing else uses. No trace, and its sessions become importable again. |
-| **read by T3** | its threads are deleted the way T3 deletes a thread. The events stay, and the sessions stay claimed. |
-
-The difference is forced by the projection cursor. It only moves forward, so a run above it has
-never been seen and can be removed cleanly. Once T3 has projected those events, deleting them
-would strand the projection rows they produced, and a compensating deletion is the only honest
-reversal — which also means the thread id stays taken, since a thread id comes from its session
-and re-importing would give one stream two creation events.
+MIT

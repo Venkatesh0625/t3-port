@@ -1,7 +1,8 @@
 import type { Config } from "../config.ts";
-import { PortError } from "../errors.ts";
+import { PortError, TooLarge } from "../errors.ts";
 import type { Provider, ReadOptions } from "../providers/index.ts";
 import type { Session } from "../session.ts";
+import { inScope, type Scope } from "../scope.ts";
 
 /**
  * One entry per session, newest first.
@@ -16,17 +17,34 @@ export async function collectAll(
   config: Config,
   providers: readonly Provider[],
   options: ReadOptions,
-): Promise<Session[]> {
+  scope?: Scope,
+): Promise<Collected> {
   const best = new Map<string, Session>();
+  const skipped: TooLarge[] = [];
   for (const provider of providers) {
-    for (const path of provider.list(config)) {
-      const session = await provider.read(config, path, options);
+    for (const path of provider.list(config, scope)) {
+      let session: Session;
+      try {
+        session = await provider.read(config, path, options);
+      } catch (error) {
+        // One unreadable transcript should not cost the user the rest of the listing.
+        if (TooLarge.is(error)) {
+          skipped.push(error);
+          continue;
+        }
+        throw error;
+      }
+      // The cheap filter errs towards keeping; this is the decision that counts.
+      if (scope && !inScope(session.cwd, scope)) continue;
       const key = `${provider.id}:${session.sessionId}`;
       const existing = best.get(key);
       if (!existing || session.stat.size > existing.stat.size) best.set(key, session);
     }
   }
-  return [...best.values()].sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+  return {
+    sessions: [...best.values()].sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs),
+    skipped,
+  };
 }
 
 /**
@@ -35,6 +53,12 @@ export async function collectAll(
  * A reference does not say which agent wrote it, so each provider is asked in turn and the
  * first that recognises it wins. Naming a provider explicitly narrows the search.
  */
+export interface Collected {
+  readonly sessions: readonly Session[];
+  /** Transcripts too large to read, reported rather than silently dropped. */
+  readonly skipped: readonly TooLarge[];
+}
+
 export async function collectRefs(
   config: Config,
   providers: readonly Provider[],

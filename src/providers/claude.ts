@@ -1,10 +1,11 @@
 import { existsSync, statSync, mkdirSync, copyFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Glob } from "bun";
 import { PortError } from "../errors.ts";
 
 import { read as readTranscript } from "./claude.transcript.ts";
 import type { Provider } from "./types.ts";
+import type { Scope } from "../scope.ts";
 
 /**
  * Claude Code keeps one directory per working directory — the absolute path with every
@@ -16,6 +17,20 @@ const dirFor = (root: string, cwd: string): string =>
 
 const scan = (root: string, pattern: string): string[] =>
   existsSync(root) ? [...new Glob(pattern).scanSync({ cwd: root, absolute: true })] : [];
+
+/**
+ * Claude's directory name is its working directory with every non-alphanumeric character
+ * replaced, which is enough to scope a listing without opening anything: the substitution keeps
+ * path prefixes as string prefixes, so a repository's own slug also prefixes its
+ * `<repo>.worktrees/...` directories. Worktrees kept elsewhere carry the repository name in a
+ * `worktrees-<name>-` segment instead.
+ */
+const slug = (path: string): string => path.replace(/[^A-Za-z0-9]/g, "-");
+
+function dirInScope(dir: string, scope: Scope): boolean {
+  const name = basename(dir);
+  return name.startsWith(slug(scope.root)) || name.includes(`worktrees-${slug(scope.name)}-`);
+}
 
 /** Session ids T3 refuses to resume are not worth importing (AgentSessionImporter.ts:32). */
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -31,8 +46,9 @@ export const claude: Provider = {
 
   // One level deep on purpose: <slug>/<session>.jsonl is a session, while anything below it
   // (<session>/subagents/agent-*.jsonl) is a sidechain of one, which T3 never makes a thread of.
-  list: (config) =>
+  list: (config, scope) =>
     scan(config.claudeProjects, "*/*.jsonl")
+      .filter((path) => scope === undefined || dirInScope(dirname(path), scope))
       .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime)
       .map((entry) => entry.path),

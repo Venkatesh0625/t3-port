@@ -1,20 +1,25 @@
 import { loadConfig } from "../config.ts";
-import type { Args } from "../cli/args.ts";
+import { requireScope, type Args } from "../cli/args.ts";
 import { collectAll, collectRefs } from "../cli/sessions.ts";
 import { planSummary } from "../cli/report.ts";
+import { tooLargeNote } from "../cli/report.ts";
 import { apply, plan } from "../ops/import.ts";
 import { backup, open } from "../t3/open.ts";
 
 export async function runImport(args: Args): Promise<number> {
   const config = loadConfig();
+  const scope = requireScope(args);
   const dryRun = args.flags["dry-run"] === true;
   const dropGenerated = args.flags["drop-generated"] === true;
 
   // No references means every importable session; the filters narrow it from there.
-  const sessions =
+  const { sessions, skipped } =
     args.refs.length === 0
-      ? await collectAll(config, args.providers, { dropGenerated })
-      : await collectRefs(config, args.providers, args.refs, { dropGenerated });
+      ? await collectAll(config, args.providers, { dropGenerated }, scope)
+      : { sessions: await collectRefs(config, args.providers, args.refs, { dropGenerated }), skipped: [] };
+
+  const note = tooLargeNote(skipped);
+  if (note) console.log(note);
 
   const { db, compatibility } = open(config, { write: !dryRun, force: args.flags.force === true });
   const result = plan(

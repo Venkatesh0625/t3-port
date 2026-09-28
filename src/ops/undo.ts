@@ -35,9 +35,10 @@ export function threadsOf(db: Database, run: Run): ImportedThread[] {
 /**
  * Lift an unprojected run out of the database.
  *
- * Its events were never read by T3, so removing them — with their receipts, their session
- * bindings, and any project the run created and nothing else uses — leaves no trace and frees
- * the thread ids, which is what lets those sessions be imported again.
+ * Its events were never read by T3, so removing them, their receipts and their session bindings
+ * leaves no trace and frees the thread ids, which is what lets those sessions be imported again.
+ * A project the run created needs no cleanup of its own: unread means unprojected, so the only
+ * record of it is the project.created event going out with the rest.
  */
 function removeRun(db: Database, run: Run): UndoResult {
   let events = 0;
@@ -54,18 +55,6 @@ function removeRun(db: Database, run: Run): UndoResult {
       "DELETE FROM provider_session_runtime WHERE thread_id IN " +
         "(SELECT DISTINCT stream_id FROM orchestration_events WHERE correlation_id = ? AND aggregate_kind = 'thread')",
       [run.id],
-    );
-    // A project the run created is only removed when nothing outside the run refers to it.
-    db.run(
-      `DELETE FROM projection_projects WHERE project_id IN (
-         SELECT DISTINCT stream_id FROM orchestration_events
-          WHERE correlation_id = ? AND event_type = 'project.created'
-            AND stream_id NOT IN (
-              SELECT json_extract(payload_json, '$.projectId') FROM orchestration_events
-               WHERE event_type = 'thread.created' AND correlation_id <> ?
-            )
-       )`,
-      [run.id, run.id],
     );
     db.run("DELETE FROM orchestration_command_receipts WHERE command_id IN " +
       "(SELECT DISTINCT command_id FROM orchestration_events WHERE correlation_id = ?)", [run.id]);

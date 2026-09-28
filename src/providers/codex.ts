@@ -3,7 +3,8 @@ import { basename } from "node:path";
 import { Glob } from "bun";
 import { PortError } from "../errors.ts";
 import { read as readRollout } from "./codex.rollout.ts";
-import { threadNames } from "./codex.names.ts";
+import { threadCwds, threadNames } from "./codex.names.ts";
+import { pathSuggestsScope } from "../scope.ts";
 import type { Provider } from "./types.ts";
 
 /**
@@ -31,8 +32,17 @@ export const codex: Provider = {
   fallbackModel: "gpt-5.4",
   locationAddressed: false,
 
-  list: (config) =>
+  // A rollout's path says nothing about where it ran, but the state database records the
+  // working directory of every thread — so a scope is still answerable without reading files.
+  list: (config, scope) =>
     rollouts(config.codexHome)
+      .filter((path) => {
+        if (scope === undefined) return true;
+        const id = sessionIdOf(path);
+        const cwd = id === null ? undefined : threadCwds(config.codexHome).get(id);
+        // Unknown to the index: keep it, and let the full check decide once it is read.
+        return cwd === undefined || pathSuggestsScope(cwd, scope) !== false;
+      })
       .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime)
       .map((entry) => entry.path),

@@ -4,6 +4,7 @@ import type { ImportedThread } from "../t3/queries.ts";
 import type { Session } from "../session.ts";
 import { shortPath } from "./paths.ts";
 import { color, pad } from "./color.ts";
+import { MAX_TRANSCRIPT_BYTES } from "../session.ts";
 import { abbreviate } from "./abbrev.ts";
 
 const SKIP_LABEL: Record<SkipReason, string> = {
@@ -104,4 +105,15 @@ export function threadList(threads: readonly ImportedThread[], limit = 15): stri
     .map((t) => `  ${id(t.sessionId ?? t.threadId)}  ${t.title.slice(0, 60)}`);
   if (threads.length > limit) lines.push(`  ... ${threads.length - limit} more`);
   return lines.join("\n");
+}
+
+const MAX_MB = MAX_TRANSCRIPT_BYTES / 1048576;
+
+/** One line for transcripts too large to read, rather than one line each. */
+export function tooLargeNote(skipped: readonly { bytes: number }[]): string | null {
+  if (skipped.length === 0) return null;
+  const mb = Math.round(skipped.reduce((n, s) => Math.max(n, s.bytes), 0) / 1048576);
+  return color.dim(
+    `${skipped.length} transcript(s) skipped, up to ${mb} MB — past the ${MAX_MB} MB read limit.`,
+  );
 }

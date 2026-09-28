@@ -1,4 +1,6 @@
 import { parseArgs } from "node:util";
+import { resolve } from "node:path";
+import { makeScope, type Scope } from "../scope.ts";
 import { PortError } from "../errors.ts";
 import { PROVIDERS, type Provider } from "../providers/index.ts";
 
@@ -11,6 +13,7 @@ import { PROVIDERS, type Provider } from "../providers/index.ts";
 const OPTIONS = {
   "dry-run": { type: "boolean" },
   project: { type: "string" },
+  path: { type: "string" },
   "force-project": { type: "boolean" },
   "create-project": { type: "boolean" },
   "include-live": { type: "boolean" },
@@ -44,4 +47,19 @@ export function parse(argv: readonly string[]): Args {
   const chosen = PROVIDERS.filter((p) => flags[p.label] === true);
 
   return { command, refs, flags, providers: chosen.length > 0 ? chosen : PROVIDERS };
+}
+
+/**
+ * The checkout a command works on.
+ *
+ * Required, because the alternative is reading every transcript on the machine to answer a
+ * question about one repository — and because an unscoped command is what turned one mistaken
+ * flag into 209 threads in the wrong project.
+ */
+export function requireScope(args: Args): Scope {
+  const path = args.flags.path;
+  if (typeof path !== "string" || path.length === 0) {
+    throw new PortError("--path <dir> is required: name the checkout to work on, e.g. --path .");
+  }
+  return makeScope(resolve(path.replace(/^~/, process.env.HOME ?? "~")));
 }

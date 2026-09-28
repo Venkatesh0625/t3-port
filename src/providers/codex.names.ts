@@ -16,6 +16,7 @@ import { join } from "node:path";
  */
 
 const cache = new Map<string, ReadonlyMap<string, string>>();
+const cwdCache = new Map<string, ReadonlyMap<string, string>>();
 
 /** The highest-numbered state database, since Codex versions the filename. */
 function newestStateDb(codexHome: string): string | null {
@@ -68,6 +69,41 @@ function fromIndexFile(codexHome: string): Map<string, string> {
     }
   }
   return names;
+}
+
+/**
+ * Each thread's working directory, from the same table.
+ *
+ * Lets a directory scope be answered before any rollout is opened, which is the difference
+ * between narrowing a listing and reading everything only to discard it.
+ */
+export function threadCwds(codexHome: string): ReadonlyMap<string, string> {
+  const cached = cwdCache.get(codexHome);
+  if (cached) return cached;
+
+  const cwds = new Map<string, string>();
+  const stateDb = newestStateDb(codexHome);
+  if (stateDb) {
+    try {
+      const db = new Database(`file:${stateDb}?immutable=1`, { readonly: true });
+      try {
+        for (const row of db
+          .query<{ id: string; cwd: string | null }, []>(
+            "SELECT id, cwd FROM threads WHERE cwd IS NOT NULL AND cwd <> ''",
+          )
+          .all()) {
+          const cwd = row.cwd?.trim();
+          if (cwd) cwds.set(row.id, cwd);
+        }
+      } finally {
+        db.close();
+      }
+    } catch {
+      // No index: every rollout stays a candidate and is judged once read.
+    }
+  }
+  cwdCache.set(codexHome, cwds);
+  return cwds;
 }
 
 export function threadNames(codexHome: string): ReadonlyMap<string, string> {

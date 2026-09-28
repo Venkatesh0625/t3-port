@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
+import { TooLarge } from "../errors.ts";
 import { isoFromMs, isoOr } from "../time.ts";
-import { deriveTitle, type Session, type Turn } from "../session.ts";
+import { deriveTitle, MAX_TRANSCRIPT_BYTES, type Session, type Turn } from "../session.ts";
 
 /**
  * Read a Codex rollout transcript.
@@ -110,6 +111,7 @@ export interface ReadOptions {
 
 export async function read(path: string, options: ReadOptions = {}): Promise<Session> {
   const st = statSync(path);
+  if (st.size > MAX_TRANSCRIPT_BYTES) throw new TooLarge(path, st.size);
   const fallbackTime = isoFromMs(st.mtimeMs);
 
   const records: Record_[] = [];

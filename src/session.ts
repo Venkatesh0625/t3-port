@@ -28,3 +28,11 @@ export function deriveTitle(turns: readonly Turn[], fallback: string): string {
   if (!opening) return fallback;
   return (opening.text.split("\n")[0] ?? "").slice(0, 100).trim() || fallback;
 }
+
+/**
+ * Largest transcript worth reading, matching the limit T3's own scanner applies.
+ *
+ * A transcript is parsed into memory whole, so one runaway file would otherwise decide the
+ * tool's footprint: a 38 MB transcript already costs 200 MB to read.
+ */
+export const MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024;

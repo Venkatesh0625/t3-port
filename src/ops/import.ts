@@ -190,6 +190,10 @@ export interface ImportOutcome {
   readonly threads: readonly Imported[];
 }
 
+interface Pending extends Imported {
+  readonly toPlace: { provider: Provider; from: string } | null;
+}
+
 export interface Imported {
   readonly threadId: string;
   readonly title: string;
@@ -207,7 +211,7 @@ export interface Imported {
 export function apply(db: Database, config: Config, plan: Plan, now = nowIso()): ImportOutcome {
   const log = new EventLog(db);
   const created = new Map<string, Project>();
-  const results: Imported[] = [];
+  const results: Pending[] = [];
 
   db.transaction(() => {
     for (const item of plan.planned) {
@@ -233,7 +237,6 @@ export function apply(db: Database, config: Config, plan: Plan, now = nowIso()):
       }
 
       const { session, threadId } = item;
-      const placedAt = item.needsPlacing ? provider.place(config, session.path, project.workspaceRoot) : null;
 
       bindSession(db, {
         provider,
@@ -267,10 +270,18 @@ export function apply(db: Database, config: Config, plan: Plan, now = nowIso()):
         title: session.title,
         turns: session.turns.length,
         workspaceRoot: project.workspaceRoot,
-        placedAt,
+        placedAt: null,
+        toPlace: item.needsPlacing ? { provider, from: session.path } : null,
       });
     }
   })();
 
-  return { runId: log.run, threads: results };
+  // Copies happen after the transaction commits. A rollback can undo rows; it cannot undo a
+  // file, so placing a transcript first would leave one behind whenever an import failed.
+  const placed = results.map(({ toPlace, ...thread }) => ({
+    ...thread,
+    placedAt: toPlace ? toPlace.provider.place(config, toPlace.from, thread.workspaceRoot) : null,
+  }));
+
+  return { runId: log.run, threads: placed };
 }

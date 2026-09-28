@@ -12,7 +12,3 @@ export function byId(id: string): Provider {
   if (!found) throw new PortError(`unknown provider '${id}'`);
   return found;
 }
-
-export function byLabel(label: string): Provider | undefined {
-  return PROVIDERS.find((p) => p.label === label);
-}

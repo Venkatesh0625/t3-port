@@ -1,5 +1,6 @@
 import type { Config } from "../config.ts";
 import type { Session } from "../session.ts";
+import type { Scope } from "../scope.ts";
 
 /**
  * Everything that differs between the agents whose history we import.
@@ -17,8 +18,14 @@ export interface Provider {
   /** Model recorded when a transcript never names one. */
   readonly fallbackModel: string;
 
-  /** Transcript paths on disk, newest first. */
-  list(config: Config): string[];
+  /**
+   * Transcript paths on disk, newest first.
+   *
+   * A scope narrows the result using whatever the provider can tell from metadata alone —
+   * directory names, its own index — so that scoping a listing avoids opening transcripts
+   * rather than opening them and throwing the results away.
+   */
+  list(config: Config, scope?: Scope): string[];
   /** Resolve a user-supplied reference to a transcript path. */
   resolve(config: Config, ref: string): string;
   read(config: Config, path: string, options: ReadOptions): Promise<Session>;

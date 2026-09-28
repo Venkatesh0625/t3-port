@@ -13,6 +13,9 @@ head2(){ printf '\n\033[1m%s\033[0m\n' "$1"; }
 q()    { sqlite3 -readonly "$SB/t3/userdata/state.sqlite" "$1" 2>/dev/null; }
 
 run() { env T3CODE_HOME="$SB/t3" CLAUDE_CONFIG_DIR="$SB/claude" CODEX_HOME="$SB/codex" $CLI "$@"; }
+# list and import are scoped commands now; SCOPE is the checkout the fixture exercises.
+SCOPE="$HOME/personal/xito-mono"
+runs_in() { run "$@" --path "$SCOPE"; }
 
 head2 "Building sandbox from live state"
 rm -rf "$SB"; mkdir -p "$SB/t3/userdata" "$SB/claude" "$SB/codex"
@@ -36,39 +39,41 @@ head2 "list"
 # Distinct session ids, not files: depth 2 only (deeper files are subagent sidechains), and a
 # transcript can sit in two directories when Claude copies a worktree session to the root.
 CLAUDE_N=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' -exec basename {} .jsonl \; | sort -u | wc -l | tr -d ' ')
-CODEX_N=$(run list --codex 2>/dev/null | head -1 | cut -d' ' -f1)
+CODEX_N=$(runs_in list --codex 2>/dev/null | head -1 | cut -d' ' -f1)
 # Piped output is never truncated, so a count here is the real total.
-check "claude lists each session once" "$(run list --claude 2>/dev/null | grep -c ' claude ')" "$CLAUDE_N"
-check "both providers is the sum" "$(run list 2>/dev/null | grep -cE ' (claude|codex) ')" "$((CLAUDE_N+CODEX_N))"
-check "--limit caps the page"     "$(run list --codex --limit 7 2>/dev/null | grep -c ' codex ')" "7"
-check "--offset skips"            "$(run list --codex --limit 5 --offset 70 2>/dev/null | head -1 | grep -c '71')" "1"
-check "--limit 0 means all"       "$(run list --codex --limit 0 2>/dev/null | grep -c ' codex ')" "$CODEX_N"
-check "a bad limit is rejected"   "$(run list --limit abc 2>&1 | grep -c 'whole number')" "1"
-check "piped output has no escape codes" "$(run list --codex --limit 3 2>/dev/null | grep -c "\\[3")" "0"
-check "the project column is shown" "$(run list --codex --limit 3 2>/dev/null | grep -c 'project')" "1"
+check "--path is required"        "$(run list 2>&1 | grep -c 'path <dir> is required')" "1"
+check "a scope narrows the listing" "$([ "$(runs_in list 2>/dev/null | head -1 | cut -d' ' -f1)" -lt "$CLAUDE_N" ] && echo yes)" "yes"
+check "both providers appear"     "$(runs_in list 2>/dev/null | grep -cE ' (claude|codex) ' | awk '{print ($1>0)?1:0}')" "1"
+check "--limit caps the page"     "$(runs_in list --codex --limit 7 2>/dev/null | grep -c ' codex ')" "7"
+check "--offset skips"            "$(runs_in list --codex --limit 2 --offset 1 2>/dev/null | head -1 | grep -c 'showing 2')" "1"
+check "--limit 0 means all"       "$(runs_in list --codex --limit 0 2>/dev/null | grep -c ' codex ')" "$CODEX_N"
+check "a bad limit is rejected"   "$(runs_in list --limit abc 2>&1 | grep -c 'whole number')" "1"
+check "piped output has no escape codes" "$(runs_in list --codex --limit 3 2>/dev/null | grep -c "\\[3")" "0"
+check "the project column is shown" "$(runs_in list --codex --limit 3 2>/dev/null | grep -c 'project')" "1"
 
 head2 "a session still being written to"
-LIVE=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' | head -1)
+# Must be inside the scope, or the guard has nothing to hold back.
+LIVE=$(find "$SB/claude/projects/$(printf '%s' "$SCOPE" | tr -c 'A-Za-z0-9' '-')" -maxdepth 1 -name '*.jsonl' -size -16M | head -1)
 touch "$LIVE"
-check "is held back"       "$(run import --claude --dry-run 2>/dev/null | grep -c 'still running')" "1"
-check "--include-live imports it" "$(run import --claude --include-live --dry-run 2>/dev/null | grep -c 'still running')" "0"
+check "is held back"       "$(runs_in import --claude --dry-run 2>/dev/null | grep -c 'still running')" "1"
+check "--include-live imports it" "$(runs_in import --claude --include-live --dry-run 2>/dev/null | grep -c 'still running')" "0"
 touch -t 202601010000 "$LIVE"
-check "and not once it is quiet" "$(run import --claude --dry-run 2>/dev/null | grep -c 'still running')" "0"
+check "and not once it is quiet" "$(runs_in import --claude --dry-run 2>/dev/null | grep -c 'still running')" "0"
 
 head2 "import --dry-run writes nothing"
 BEFORE=$(q "select count(*) from orchestration_events")
-run import --dry-run >/dev/null 2>&1
+runs_in import --dry-run >/dev/null 2>&1
 check "event count unchanged" "$(q 'select count(*) from orchestration_events')" "$BEFORE"
 
 head2 "import (claude)"
-run import --claude >/dev/null 2>&1
+runs_in import --claude >/dev/null 2>&1
 CL=$(q "select count(*) from provider_session_runtime where thread_id glob 'import:claudeAgent:*'")
 [ "$CL" -gt 0 ] && ok "imported $CL claude thread(s)" || bad "imported no claude threads"
 check "cursors carry a resume key" \
   "$(q "select count(*) from provider_session_runtime where thread_id glob 'import:claudeAgent:*' and json_extract(resume_cursor_json,'\$.resume') is null")" "0"
 
 head2 "import (codex)"
-run import --codex --drop-generated >/dev/null 2>&1
+runs_in import --codex --drop-generated >/dev/null 2>&1
 CX=$(q "select count(*) from provider_session_runtime where thread_id glob 'import:codex:*'")
 [ "$CX" -gt 0 ] && ok "imported $CX codex thread(s)" || bad "imported no codex threads"
 check "cursors have NO resume key" \
@@ -89,7 +94,9 @@ check "roles are only user/assistant" \
   "$(q "select count(*) from orchestration_events where stream_id glob 'import:*' and event_type='thread.message-sent' and json_extract(payload_json,'\$.role') not in ('user','assistant')")" "0"
 
 head2 "idempotency"
-check "re-import plans nothing" "$(run import --drop-generated --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "0"
+# Re-run exactly what was imported; anything else compares different filters.
+check "claude re-import plans nothing" "$(runs_in import --claude --dry-run 2>/dev/null | grep -m1 'to import' | cut -d' ' -f1)" "0"
+check "codex re-import plans nothing"  "$(runs_in import --codex --drop-generated --dry-run 2>/dev/null | grep -m1 'to import' | cut -d' ' -f1)" "0"
 
 head2 "runs"
 check "two imports are two runs" "$(run runs 2>/dev/null | grep -cE '^  [0-9a-f]{8}  ')" "2"
@@ -102,7 +109,7 @@ run undo >/dev/null 2>&1
 check "codex streams gone"  "$(q "select count(distinct stream_id) from orchestration_events where stream_id glob 'import:codex:*'")" "0"
 check "codex bindings gone" "$(q "select count(*) from provider_session_runtime where thread_id glob 'import:codex:*'")" "0"
 check "the other run is untouched" "$(q "select count(distinct stream_id) from orchestration_events where stream_id glob 'import:claudeAgent:*'")" "$CL"
-check "its sessions are importable again" "$(run import --codex --drop-generated --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "$CX"
+check "its sessions are importable again" "$(runs_in import --codex --drop-generated --dry-run 2>/dev/null | grep -m1 'to import' | cut -d' ' -f1)" "$CX"
 
 head2 "undo compensates once T3 has read a run"
 sqlite3 "$SB/t3/userdata/state.sqlite" "update projection_state set last_applied_sequence = (select max(sequence) from orchestration_events);"
@@ -114,15 +121,15 @@ check "a second undo adds nothing"      "$(q "select count(*) from orchestration
 
 head2 "guards"
 cp ~/.t3/userdata/server-runtime.json "$SB/t3/userdata/" 2>/dev/null
-run import >/dev/null 2>&1; check "refuses while T3 runs" "$?" "1"
+runs_in import >/dev/null 2>&1; check "refuses while T3 runs" "$?" "1"
 rm -f "$SB/t3/userdata/server-runtime.json"
 sqlite3 "$SB/t3/userdata/state.sqlite" "ALTER TABLE projection_thread_messages ADD COLUMN drift_probe TEXT;" 2>/dev/null
 run doctor >/dev/null 2>&1;            check "doctor flags schema drift" "$?" "1"
-run import >/dev/null 2>&1;            check "import refuses on drift"   "$?" "1"
-run import --force --dry-run >/dev/null 2>&1; check "--force overrides" "$?" "0"
+runs_in import >/dev/null 2>&1;            check "import refuses on drift"   "$?" "1"
+runs_in import --force --dry-run >/dev/null 2>&1; check "--force overrides" "$?" "0"
 
 head2 "a compensated run stays claimed"
-check "its sessions are not offered again" "$(run import --claude --dry-run 2>/dev/null | head -1 | cut -d' ' -f1)" "0"
+check "its sessions are not offered again" "$(runs_in import --claude --dry-run 2>/dev/null | grep -m1 'to import' | cut -d' ' -f1)" "0"
 
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] && echo "sandbox: $SB (delete when done)" 
