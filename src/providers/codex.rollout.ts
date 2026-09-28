@@ -179,7 +179,12 @@ export async function read(path: string, options: ReadOptions = {}): Promise<Ses
     provider: "codex",
     path,
     sessionId,
-    title: deriveTitle(turns, "Imported Codex thread"),
+    // Derived from the first turn the user actually wrote, whether or not the generated ones
+    // were kept: "# AGENTS.md instructions for ..." names no conversation.
+    title: deriveTitle(
+      turns.filter((turn) => turn.role !== "user" || !isGenerated(turn.text)),
+      "Imported Codex thread",
+    ),
     model,
     cwd,
     turns,

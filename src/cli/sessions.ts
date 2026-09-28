@@ -11,7 +11,7 @@ export async function collectAll(
 ): Promise<Session[]> {
   const sessions: Session[] = [];
   for (const provider of providers) {
-    for (const path of provider.list(config)) sessions.push(await provider.read(path, options));
+    for (const path of provider.list(config)) sessions.push(await provider.read(config, path, options));
   }
   return sessions.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
 }
@@ -34,7 +34,7 @@ export async function collectRefs(
     const failures: string[] = [];
     for (const provider of providers) {
       try {
-        found = await provider.read(provider.resolve(config, ref), options);
+        found = await provider.read(config, provider.resolve(config, ref), options);
         break;
       } catch (error) {
         failures.push(error instanceof Error ? error.message : String(error));

@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { Glob } from "bun";
 import { PortError } from "../errors.ts";
 import { read as readRollout } from "./codex.rollout.ts";
+import { threadNames } from "./codex.index.ts";
 import type { Provider } from "./types.ts";
 
 /**
@@ -46,7 +47,12 @@ export const codex: Provider = {
     return hits[0]!;
   },
 
-  read: (path, options) => readRollout(path, options),
+  async read(config, path, options) {
+    const session = await readRollout(path, options);
+    // A rollout never carries the name /rename sets; the session index does.
+    const named = threadNames(config.codexHome).get(session.sessionId);
+    return named ? { ...session, title: named } : session;
+  },
 
   // Ids come from session_meta rather than a filename, so there is no format to validate.
   isResumable: (sessionId) => sessionId.length > 0,

@@ -30,6 +30,7 @@ bun run src/main.ts doctor
 ```sh
 t3-port doctor                 # is this tool safe against your installed T3?
 t3-port list                   # sessions on disk, marked t3 / imported / -
+t3-port list --codex --limit 0 # one provider, no paging
 t3-port import --dry-run       # plan; no references means every importable session
 t3-port import                 # write (quit T3 Code first)
 t3-port runs                   # import runs, newest first
@@ -109,6 +110,26 @@ Command shapes come from T3's own source, not from guessing:
 | `attachments` / `context` optional on messages | `packages/contracts/src/orchestration.ts:1912` |
 | Session ids T3 can resume | `apps/server/src/project/AgentSessionImporter.ts:32` |
 
+## Listing
+
+```
+510 session(s), showing 1–40
+
+          agent  session   turns  project                     title
+-         codex  01a0e776     12  ~/personal/xito-mono        cloudflare-bot-traffic-alert
+imported  claude 6ac97664    475  ~/personal/xito-mono        Notetaker Cloudflare migration
+-         codex  01a0c0be     97  …db6bbe3/incongruous-feels  bl2
+```
+
+The project column is the project a session would import into, resolved exactly the way
+`import` resolves it — including following a worktree back to its repository — so the two can
+never disagree. A session no project covers shows the directory it ran in instead, dimmed, since
+that is usually why it is unplaced.
+
+A terminal gets 40 rows; piped output is never truncated and carries no escape codes, so
+`| grep` and `| wc -l` work. `--limit` and `--offset` override, and `--limit 0` means all.
+Colour follows NO_COLOR and FORCE_COLOR.
+
 ## Codex
 
 Codex differs from Claude in every way that matters, so the reader is separate:
@@ -123,6 +144,13 @@ Codex differs from Claude in every way that matters, so the reader is separate:
 
 That last row is the one that silently breaks things: writing Claude's cursor shape for a Codex
 thread leaves the session unresumable.
+
+### Thread names
+
+A rollout records the conversation but not what it is called: the name `/rename` sets lives in
+`~/.codex/session_index.jsonl`, one `{id, thread_name}` per line. Sessions that were renamed use
+that name; the rest fall back to their first real user turn — first real, because a title of
+`# AGENTS.md instructions for ...` names no conversation.
 
 ### Generated preamble
 

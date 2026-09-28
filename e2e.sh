@@ -32,9 +32,18 @@ head2 "doctor"
 run doctor >/dev/null 2>&1; check "exits 0 on a matching schema" "$?" "0"
 
 head2 "list"
-check "both providers"   "$(run list 2>/dev/null | grep -cE '^(t3|imported|-) ')" "40"
-check "claude only"      "$(run list --claude 2>/dev/null | grep -c 'claude ')" "40"
-check "codex only"       "$(run list --codex  2>/dev/null | grep -c 'codex ')"  "40"
+# Depth 2 only: deeper files are subagent sidechains, not resumable sessions.
+CLAUDE_N=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' | wc -l | tr -d ' ')
+CODEX_N=$(run list --codex 2>/dev/null | head -1 | cut -d' ' -f1)
+# Piped output is never truncated, so a count here is the real total.
+check "claude only lists every transcript" "$(run list --claude 2>/dev/null | grep -c ' claude ')" "$CLAUDE_N"
+check "both providers is the sum" "$(run list 2>/dev/null | grep -cE ' (claude|codex) ')" "$((CLAUDE_N+CODEX_N))"
+check "--limit caps the page"     "$(run list --codex --limit 7 2>/dev/null | grep -c ' codex ')" "7"
+check "--offset skips"            "$(run list --codex --limit 5 --offset 70 2>/dev/null | head -1 | grep -c '71')" "1"
+check "--limit 0 means all"       "$(run list --codex --limit 0 2>/dev/null | grep -c ' codex ')" "$CODEX_N"
+check "a bad limit is rejected"   "$(run list --limit abc 2>&1 | grep -c 'whole number')" "1"
+check "piped output has no escape codes" "$(run list --codex --limit 3 2>/dev/null | grep -c "\\[3")" "0"
+check "the project column is shown" "$(run list --codex --limit 3 2>/dev/null | grep -c 'project')" "1"
 
 head2 "import --dry-run writes nothing"
 BEFORE=$(q "select count(*) from orchestration_events")

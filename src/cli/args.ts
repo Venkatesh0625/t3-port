@@ -14,6 +14,8 @@ const OPTIONS = {
   "force-project": { type: "boolean" },
   "create-project": { type: "boolean" },
   "drop-generated": { type: "boolean" },
+  limit: { type: "string" },
+  offset: { type: "string" },
   force: { type: "boolean" },
   help: { type: "boolean", short: "h" },
   ...Object.fromEntries(PROVIDERS.map((p) => [p.label, { type: "boolean" as const }])),

@@ -29,6 +29,8 @@ export const claude: Provider = {
   fallbackModel: "claude-opus-5-5",
   locationAddressed: true,
 
+  // One level deep on purpose: <slug>/<session>.jsonl is a session, while anything below it
+  // (<session>/subagents/agent-*.jsonl) is a sidechain of one, which T3 never makes a thread of.
   list: (config) =>
     scan(config.claudeProjects, "*/*.jsonl")
       .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
@@ -44,7 +46,7 @@ export const claude: Provider = {
     return biggest(hits);
   },
 
-  read: (path) => readTranscript(path),
+  read: (_config, path) => readTranscript(path),
 
   isResumable: (sessionId) => SESSION_ID.test(sessionId),
 

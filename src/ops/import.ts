@@ -1,10 +1,10 @@
 import type { Database } from "bun:sqlite";
-import { resolve as resolvePath, sep } from "node:path";
+import { resolve as resolvePath } from "node:path";
 import type { Config } from "../config.ts";
 import { byId, type Provider } from "../providers/index.ts";
 import { hasUserTurn, type Session } from "../session.ts";
 import { nowIso } from "../time.ts";
-import { impliedRepoName, repoRootOf } from "../worktree.ts";
+import { enclosing, nameOf, suggest, under } from "./locate.ts";
 import { bindSession, importedThreadId, projectCreate, threadCreate, threadHistoryImport } from "../t3/commands.ts";
 import { EventLog } from "../t3/eventlog.ts";
 import { importedSessionIds, nativeSessionIds, projects, type Project } from "../t3/queries.ts";
@@ -61,41 +61,7 @@ export interface PlanOptions {
   readonly createProject?: boolean;
 }
 
-const under = (child: string, parent: string): boolean =>
-  child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
-
-const nameOf = (path: string): string => path.split(sep).pop() || path;
-
 const expand = (path: string): string => resolvePath(path.replace(/^~/, process.env.HOME ?? "~"));
-
-/** The most specific project directly containing a directory. */
-function directlyEnclosing(all: readonly Project[], cwd: string): Project | null {
-  const hits = all.filter((p) => under(cwd, p.workspaceRoot));
-  if (hits.length === 0) return null;
-  return hits.reduce((best, p) => (p.workspaceRoot.length > best.workspaceRoot.length ? p : best));
-}
-
-/**
- * The project owning a session's directory, following a worktree back to its repository.
- *
- * Only git is trusted: a live worktree resolves to its real main checkout. A deleted one can
- * only be guessed from the path shape, which becomes a suggestion instead.
- */
-function enclosing(all: readonly Project[], cwd: string): Project | null {
-  const direct = directlyEnclosing(all, cwd);
-  if (direct) return direct;
-  const repoRoot = repoRootOf(cwd);
-  return repoRoot ? directlyEnclosing(all, repoRoot) : null;
-}
-
-/** A project whose directory name matches the repository a dead worktree path implies. */
-function suggestFor(all: readonly Project[], cwd: string | null): string | undefined {
-  if (!cwd) return undefined;
-  const name = impliedRepoName(cwd);
-  if (!name) return undefined;
-  const matches = all.filter((p) => nameOf(p.workspaceRoot) === name);
-  return matches.length === 1 ? matches[0]!.workspaceRoot : undefined;
-}
 
 function targetFor(
   all: readonly Project[],
@@ -178,7 +144,7 @@ export function plan(
       continue;
     }
     if (!target) {
-      skipped.push({ session, reason: "no-project", suggestion: suggestFor(all, session.cwd) });
+      skipped.push({ session, reason: "no-project", suggestion: suggest(all, session.cwd)?.workspaceRoot });
       continue;
     }
 

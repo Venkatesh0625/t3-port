@@ -41,3 +41,10 @@ test("undo takes an optional run reference", () => {
   expect(parse(["undo"]).refs).toEqual([]);
   expect(parse(["undo", "d03f8e72"]).refs).toEqual(["d03f8e72"]);
 });
+
+test("list takes pagination values", () => {
+  expect(parse(["list", "--limit", "10", "--offset", "20"]).flags).toMatchObject({
+    limit: "10",
+    offset: "20",
+  });
+});

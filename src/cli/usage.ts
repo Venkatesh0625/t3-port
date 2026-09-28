@@ -11,6 +11,10 @@ export const USAGE = `t3-port — move conversation history into T3 Code
 Providers (all unless named)
 ${PROVIDERS.map((p) => `  --${p.label.padEnd(18)} ${p.id}`).join("\n")}
 
+List
+  --limit <n>            rows to show; 0 for all. Defaults to 40 in a terminal, all when piped
+  --offset <n>           skip this many rows
+
 Import
   --dry-run              plan only, write nothing
   --project <path|id>    only sessions that ran under this project
