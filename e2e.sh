@@ -67,6 +67,7 @@ check "no --path needed for a named session" "$(run import "$REF" --dry-run 2>&1
 check "a scope it is not in does not reject it" "$(run import --path "$HOME" "$REF" --dry-run 2>&1 | grep -c 'to import')" "1"
 check "--path is still required without one" "$(run import --dry-run 2>&1 | grep -c 'path <dir> is required')" "1"
 check "an unmatched reference says one thing" "$(run import zzzzzzzz --dry-run 2>&1 | grep -c 'no session matches')" "1"
+check "a named session gets a reason, not a tally" "$(run import "$REF" --dry-run 2>&1 | grep -c 'to import')" "1"
 
 head2 "import --dry-run writes nothing"
 BEFORE=$(q "select count(*) from orchestration_events")

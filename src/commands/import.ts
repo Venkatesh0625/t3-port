@@ -1,7 +1,7 @@
 import { loadConfig } from "../config.ts";
 import { optionalScope, requireScope, type Args } from "../cli/args.ts";
 import { collectAll, collectRefs } from "../cli/sessions.ts";
-import { planSummary } from "../cli/report.ts";
+import { planSummary, skipReasons } from "../cli/report.ts";
 import { apply, plan } from "../ops/import.ts";
 import { backup, open } from "../t3/open.ts";
 
@@ -32,6 +32,12 @@ export async function runImport(args: Args): Promise<number> {
     config.worktrees,
   );
 
+  // Naming sessions is a question about those sessions; scanning a checkout is a question
+  // about the checkout, and only that one wants a tally.
+  if (args.refs.length > 0 && result.planned.length === 0) {
+    console.log(skipReasons(result));
+    return 0;
+  }
   console.log(planSummary(result));
 
   const generated = result.planned.reduce((n, item) => n + item.session.generated, 0);

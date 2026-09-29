@@ -17,6 +17,18 @@ const SKIP_LABEL: Record<SkipReason, string> = {
   noise: "a command or one-liner (--include-noise to import anyway)",
 };
 
+/** Said to someone who named this session, who wants a reason rather than a tally. */
+const SKIP_SENTENCE: Record<SkipReason, string> = {
+  "no-user-turn": "it has no user message, so there is no conversation to carry over",
+  "unresumable-session-id": "its id is not one T3 can resume, so the thread could not continue",
+  "already-imported": "T3 already has it — `t3-port runs` shows which import it came in on",
+  "t3-native": "T3 started this session itself, so a thread for it already exists",
+  "no-project": "no T3 project covers the directory it ran in — `--create-project` makes one",
+  "other-project": "it ran outside the project named by `--project`",
+  "in-progress": "it is still being written to — `--include-live` imports it as it stands",
+  noise: "it is a command record rather than a conversation — `--include-noise` imports it anyway",
+};
+
 
 /** Beyond this the column crowds out the title. */
 export const MAX_PROJECT_WIDTH = 34;
@@ -73,6 +85,20 @@ export function sessionLine(
     `${pad(known ? color.cyan(shown) : color.dim(shown), width)}  ` +
     session.title.slice(0, TITLE_WIDTH)
   );
+}
+
+/**
+ * Why each named session was left out.
+ *
+ * Naming a session and being answered with "0 to import, 1 skipped" is a tally where a reason
+ * was asked for; the count only earns its place when the plan covers a whole checkout.
+ */
+export function skipReasons(plan: Plan): string {
+  const id = abbreviate(plan.skipped.map((s) => s.session.sessionId)).of;
+  return plan.skipped
+    .map((s) => `  ${color.dim(id(s.session.sessionId))}  ${s.session.title.slice(0, 40)}`
+      + `\n    ${SKIP_SENTENCE[s.reason]}`)
+    .join("\n");
 }
 
 export function planSummary(plan: Plan): string {
