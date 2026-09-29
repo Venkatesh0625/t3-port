@@ -45,3 +45,38 @@ describe("what a path alone can decide", () => {
     });
   });
 });
+
+describe("pointing at a worktree rather than a checkout", () => {
+  // A path under .t3/worktrees looks like a worktree of something, and `--path <that worktree>`
+  // used to find nothing at all: the worktree check ran first and compared the repository it
+  // came from against the worktree's own directory name.
+  const WT = "/Users/x/.t3/worktrees/rha-service/t3code-7e3e675b";
+  const scope = makeScope(WT);
+
+  test("it is recognised as a worktree", () => {
+    expect(scope.isWorktree).toBe(true);
+  });
+
+  test("a session that ran there is in scope", () => {
+    expect(pathSuggestsScope(WT, scope)).toBe(true);
+  });
+
+  test("so is one in a subdirectory of it", () => {
+    // Decided here, not deferred: git would answer with the main checkout instead.
+    expect(pathSuggestsScope(`${WT}/packages/api`, scope)).toBe(true);
+  });
+
+  test("a sibling worktree of the same repository is not", () => {
+    expect(pathSuggestsScope("/Users/x/.t3/worktrees/rha-service/other-leaf", scope)).toBe(false);
+  });
+
+  test("neither is the repository it was made from", () => {
+    expect(pathSuggestsScope("/Users/x/code/rha-service", scope)).toBe(false);
+  });
+
+  test("a checkout scope still claims its worktrees", () => {
+    const repo = makeScope("/Users/x/code/rha-service");
+    expect(repo.isWorktree).toBe(false);
+    expect(pathSuggestsScope(WT, repo)).toBe(true);
+  });
+});

@@ -44,7 +44,9 @@ front and a long worktree name is shortened instead.
 Command records and one-line sessions (`/clear`, `/login`, workspace-naming prompts) are hidden
 from listings and skipped by imports; `--include-noise` keeps them.
 
-`--path` names a **checkout**, not a directory tree. `--path ~/code/app` covers that repository,
+`--path` takes either a checkout or a single worktree. A checkout covers its subdirectories and
+every worktree made from it, wherever those are kept; a worktree covers only itself, since
+naming one is how you ask for that one. It names a **checkout**, not a directory tree. `--path ~/code/app` covers that repository,
 its subdirectories and the worktrees made from it, wherever those are kept. It does not cover a
 different checkout that merely sits underneath — which is what keeps `--path ~` from meaning
 "everything on the machine".
