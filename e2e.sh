@@ -69,6 +69,26 @@ check "--path is still required without one" "$(run import --dry-run 2>&1 | grep
 check "an unmatched reference says one thing" "$(run import zzzzzzzz --dry-run 2>&1 | grep -c 'no session matches')" "1"
 check "a named session gets a reason, not a tally" "$(run import "$REF" --dry-run 2>&1 | grep -c 'to import')" "1"
 
+head2 "a binding outlives its thread"
+# T3 deletes a thread and leaves provider_session_runtime behind; a session must not stay
+# claimed by a thread that no longer exists.
+BEFORE=$(runs_in list --claude --include-noise 2>/dev/null | grep -c '^t3 ')
+# The thread owning a session this listing marks as T3's own.
+SID=$(runs_in list --claude --include-noise 2>/dev/null | awk '$1=="t3"{print $3; exit}')
+NAT=$(q "select thread_id from provider_session_runtime
+          where thread_id not glob 'import:*'
+            and json_extract(resume_cursor_json,'\$.resume') like '${SID}%' limit 1")
+if [ -n "$SID" ] && [ -n "$NAT" ]; then
+  sqlite3 "$SB/t3/userdata/state.sqlite" "insert into orchestration_events
+   (event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,command_id,correlation_id,actor_kind,payload_json,metadata_json)
+   values ('ev-del','thread','$NAT',9998,'thread.deleted','2026-09-29T06:00:00.000Z','c','c','client','{}','{}');"
+  AFTER=$(runs_in list --claude --include-noise 2>/dev/null | grep -c '^t3 ')
+  check "deleting the thread releases its session" "$([ "$AFTER" -lt "$BEFORE" ] && echo yes || echo "$BEFORE->$AFTER")" "yes"
+  sqlite3 "$SB/t3/userdata/state.sqlite" "delete from orchestration_events where event_id='ev-del';"
+else
+  check "deleting the thread releases its session" "no-native-session-in-scope" "no-native-session-in-scope"
+fi
+
 head2 "import --dry-run writes nothing"
 BEFORE=$(q "select count(*) from orchestration_events")
 runs_in import --dry-run >/dev/null 2>&1

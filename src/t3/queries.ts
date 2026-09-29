@@ -28,16 +28,32 @@ export function projects(db: Database): Project[] {
 }
 
 /**
- * Sessions T3 started itself — never re-import one of these.
+ * Sessions a live T3 thread already resumes — never import one of these, or two threads would
+ * write to one transcript.
  *
- * Import bindings are excluded: they outlive the threads they belonged to, and counting them
- * would permanently mark every undone session as "started by T3".
+ * A binding outlives its thread: T3 deletes a thread and leaves the row, and on one machine 31
+ * of 42 of them belonged to threads that no longer exist. Counting those marks a conversation
+ * "started by T3" for good, while T3 shows it nowhere at all. Existence is decided from the
+ * event log rather than the projections, which only advance when T3 starts.
+ *
+ * Import bindings are excluded for the same reason from the other direction: they outlive an
+ * undone import, and counting them would make every undone session permanently native.
  */
 export function nativeSessionIds(db: Database, provider: Provider): Set<string> {
   const rows = db
     .query<{ resume_cursor_json: string | null }, [string]>(
-      "SELECT resume_cursor_json FROM provider_session_runtime " +
-        "WHERE provider_name = ? AND thread_id NOT GLOB 'import:*'",
+      `SELECT r.resume_cursor_json
+         FROM provider_session_runtime r
+        WHERE r.provider_name = ?
+          AND r.thread_id NOT GLOB 'import:*'
+          AND EXISTS (
+            SELECT 1 FROM orchestration_events e
+             WHERE e.stream_id = r.thread_id AND e.event_type = 'thread.created'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM orchestration_events e
+             WHERE e.stream_id = r.thread_id AND e.event_type = 'thread.deleted'
+          )`,
     )
     .all(provider.id);
   const ids = new Set<string>();
@@ -152,7 +168,11 @@ export function ownersBySession(db: Database): Map<string, Owner> {
          LEFT JOIN projection_threads t ON t.thread_id = r.thread_id AND t.deleted_at IS NULL
          LEFT JOIN orchestration_events e
            ON e.stream_id = r.thread_id AND e.event_type = 'thread.created'
-        WHERE r.resume_cursor_json IS NOT NULL`,
+        WHERE r.resume_cursor_json IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM orchestration_events d
+             WHERE d.stream_id = r.thread_id AND d.event_type = 'thread.deleted'
+          )`,
     )
     .all()) {
     const cursor = asObject(row.resume_cursor_json);
