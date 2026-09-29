@@ -22,7 +22,8 @@ const SKIP_SENTENCE: Record<SkipReason, string> = {
   "no-user-turn": "it has no user message, so there is no conversation to carry over",
   "unresumable-session-id": "its id is not one T3 can resume, so the thread could not continue",
   "already-imported": "T3 already has it",
-  "t3-native": "T3 started this session itself, so a thread for it already exists",
+  "t3-native":
+    "T3 started this session itself, so a thread for it already exists — `--reclaim` imports it anyway",
   "no-project": "no T3 project covers the directory it ran in — `--create-project` makes one",
   "other-project": "it ran outside the project named by `--project`",
   "in-progress": "it is still being written to — `--include-live` imports it as it stands",
@@ -101,10 +102,15 @@ export function skipReasons(plan: Plan): string {
         `  ${color.dim(id(s.session.sessionId))}  ${s.session.title.slice(0, 40)}`,
         `    ${SKIP_SENTENCE[s.reason]}`,
       ];
-      // Where the conversation actually is beats any further explanation of why it is not here —
-      // unless the thread carries the same title, where saying so twice tells nobody anything.
-      if (s.owner && s.owner.title.trim() !== s.session.title.trim()) {
-        lines.push(`    it is in T3 as ${color.cyan(s.owner.title.slice(0, 48))}`);
+      // Where the conversation is, and in what state. Said even when the title matches: a
+      // thread that holds a session and cannot be found is the thing worth naming, and the
+      // reader has no other way to tell an archived thread from one they simply cannot see.
+      if (s.owner) {
+        const named = s.owner.title.trim();
+        const where = named ? color.cyan(named) : color.dim(s.owner.threadId);
+        const state = s.owner.archived ? color.yellow(" (archived)") : "";
+        lines.push(`    it is in T3 as ${where}${state}`);
+        lines.push(color.dim(`    thread ${s.owner.threadId}`));
       }
       if (s.suggestion) lines.push(`    probably ${s.suggestion} — confirm with --project`);
       return lines.join("\n");

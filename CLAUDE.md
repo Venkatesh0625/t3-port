@@ -36,6 +36,10 @@ underneath a running T3 are stepped over and never projected — and no restart 
 - **A scope is a checkout, not a directory tree.** `--path ~` once matched every session on the
   machine, because everything is below the home directory. Work done in `~/code/app` belongs to
   that checkout, not to whatever contains it.
+- **A binding decides what T3 holds; a path does not.** Anything under `~/.t3/worktrees` was
+  once assumed to be T3's own, but running `claude` by hand inside a worktree makes a session
+  T3 never started — and the guess then claimed a conversation no thread held, with no way to
+  import it.
 - **Don't guess which project a session belongs to.** Git resolves a live worktree; a deleted
   one only ever produces a suggestion the user confirms.
 - **Stream transcripts; never read one whole.** A 38 MB session is 0.25 MB of prose — 0.7%.

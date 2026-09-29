@@ -93,6 +93,15 @@ export interface PlanOptions {
   readonly includeLive?: boolean;
   /** Import command records and one-line sessions too. */
   readonly includeNoise?: boolean;
+  /**
+   * Import a session even though a T3 thread already resumes it.
+   *
+   * Two threads on one provider session both write to its transcript, which is why this is not
+   * the default. It is the right call when the thread that claims a conversation was deleted or
+   * archived and the conversation is wanted back — and whether that is so is the user's to say,
+   * not something to infer from a binding.
+   */
+  readonly reclaim?: boolean;
   /** Overridable for tests. */
   readonly now?: number;
 }
@@ -135,14 +144,16 @@ function classify(
   session: Session,
   provider: Provider,
   known: Known,
-  worktrees: string,
   options: PlanOptions,
 ): SkipReason | null {
   if (!provider.isResumable(session.sessionId)) return "unresumable-session-id";
   if (!hasUserTurn(session)) return "no-user-turn";
   if (known.imported.has(session.sessionId)) return "already-imported";
-  if (known.native.has(session.sessionId)) return "t3-native";
-  if (session.cwd && under(session.cwd, worktrees)) return "t3-native";
+  // Only a binding says a thread holds this session. Where a session ran used to say it too —
+  // anything under T3's worktrees was assumed to be T3's — but running `claude` by hand inside
+  // a worktree produces a session T3 never started, and the guess then claimed a conversation
+  // no thread held. Bindings answer the question the guess was approximating.
+  if (!options.reclaim && known.native.has(session.sessionId)) return "t3-native";
   if (!options.includeNoise && isNoise(session)) return "noise";
   if (!options.includeLive) {
     const age = (options.now ?? Date.now()) - session.stat.mtimeMs;
@@ -180,7 +191,7 @@ export function plan(
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const reason = classify(session, provider, known(provider), worktrees, options);
+    const reason = classify(session, provider, known(provider), options);
     if (reason) {
       const owner = owners.get(session.sessionId);
       skipped.push(owner ? { session, reason, owner } : { session, reason });

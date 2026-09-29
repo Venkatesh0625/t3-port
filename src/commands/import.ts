@@ -2,6 +2,7 @@ import { loadConfig } from "../config.ts";
 import { optionalScope, requireScope, type Args } from "../cli/args.ts";
 import { collectAll, collectRefs } from "../cli/sessions.ts";
 import { planSummary, skipReasons } from "../cli/report.ts";
+import { color } from "../cli/color.ts";
 import { apply, plan } from "../ops/import.ts";
 import { backup, open } from "../t3/open.ts";
 
@@ -28,6 +29,7 @@ export async function runImport(args: Args): Promise<number> {
       createProject: args.flags["create-project"] === true,
       includeLive: args.flags["include-live"] === true,
       includeNoise: args.flags["include-noise"] === true,
+      reclaim: args.flags.reclaim === true,
     },
     config.worktrees,
   );
@@ -39,6 +41,15 @@ export async function runImport(args: Args): Promise<number> {
     return 0;
   }
   console.log(planSummary(result));
+
+  if (args.flags.reclaim === true && result.planned.length > 0) {
+    console.log(
+      color.yellow(
+        `\nReclaiming: a T3 thread already resumes ${result.planned.length === 1 ? "this session" : "some of these"}. ` +
+          `If that thread is still in use, both it and the new one write to the same transcript.`,
+      ),
+    );
+  }
 
   const generated = result.planned.reduce((n, item) => n + item.session.generated, 0);
   if (generated > 0 && !dropGenerated) {

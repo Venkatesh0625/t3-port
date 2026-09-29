@@ -39,6 +39,8 @@ Import
   --include-live         import sessions that still look like they are running
   --include-noise        import command records and one-line sessions too
   --settled              leave imported threads settled, out of the active list
+  --reclaim              import even though a T3 thread already resumes the session, as when
+                         that thread was deleted or archived and the conversation is wanted back
   --drop-generated       drop preamble a provider wrote as user turns (Codex AGENTS.md,
                          <environment_context>); off by default so no real user text is removed
 

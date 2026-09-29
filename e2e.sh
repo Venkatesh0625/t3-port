@@ -89,6 +89,16 @@ else
   check "deleting the thread releases its session" "no-native-session-in-scope" "no-native-session-in-scope"
 fi
 
+head2 "reclaiming a session a thread already holds"
+CLAIMED=$(runs_in list --claude --include-noise 2>/dev/null | awk '$1=="t3"{print $3; exit}')
+if [ -n "$CLAIMED" ]; then
+  check "blocked by default"  "$(run import "$CLAIMED" --dry-run 2>&1 | grep -c 'already exists')" "1"
+  check "--reclaim overrides" "$(run import "$CLAIMED" --reclaim --dry-run 2>&1 | grep -c '1 to import')" "1"
+  check "and it says what that costs" "$(run import "$CLAIMED" --reclaim --dry-run 2>&1 | grep -c 'same transcript')" "1"
+else
+  check "reclaim" "no-claimed-session" "no-claimed-session"
+fi
+
 head2 "import --dry-run writes nothing"
 BEFORE=$(q "select count(*) from orchestration_events")
 runs_in import --dry-run >/dev/null 2>&1

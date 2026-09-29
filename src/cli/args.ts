@@ -19,6 +19,7 @@ const OPTIONS = {
   "include-live": { type: "boolean" },
   "include-noise": { type: "boolean" },
   settled: { type: "boolean" },
+  reclaim: { type: "boolean" },
   "drop-generated": { type: "boolean" },
   sort: { type: "string" },
   limit: { type: "string" },

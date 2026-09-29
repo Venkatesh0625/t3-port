@@ -143,6 +143,8 @@ export function liveImportedThreads(db: Database): ImportedThread[] {
 export interface Owner {
   readonly threadId: string;
   readonly title: string;
+  /** Archived threads still resume their session but do not appear in the thread list. */
+  readonly archived: boolean;
 }
 
 /**
@@ -155,7 +157,12 @@ export function ownersBySession(db: Database): Map<string, Owner> {
   const owners = new Map<string, Owner>();
   for (const row of db
     .query<
-      { thread_id: string; title: string | null; resume_cursor_json: string | null },
+      {
+        thread_id: string;
+        title: string | null;
+        archived: number;
+        resume_cursor_json: string | null;
+      },
       []
     >(
       // The title comes from the projection when there is one and from the creation event
@@ -163,6 +170,10 @@ export function ownersBySession(db: Database): Map<string, Owner> {
       // answering with a raw thread id tells the reader nothing.
       `SELECT r.thread_id,
               COALESCE(t.title, json_extract(e.payload_json, '$.title')) AS title,
+              EXISTS (
+                SELECT 1 FROM orchestration_events a
+                 WHERE a.stream_id = r.thread_id AND a.event_type = 'thread.archived'
+              ) AS archived,
               r.resume_cursor_json
          FROM provider_session_runtime r
          LEFT JOIN projection_threads t ON t.thread_id = r.thread_id AND t.deleted_at IS NULL
@@ -179,7 +190,11 @@ export function ownersBySession(db: Database): Map<string, Owner> {
     for (const provider of PROVIDERS) {
       const sessionId = provider.sessionIdFromCursor(cursor);
       if (sessionId) {
-        owners.set(sessionId, { threadId: row.thread_id, title: row.title ?? row.thread_id });
+        owners.set(sessionId, {
+          threadId: row.thread_id,
+          title: row.title ?? "",
+          archived: row.archived === 1,
+        });
         break;
       }
     }
