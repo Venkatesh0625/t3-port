@@ -28,6 +28,9 @@ underneath a running T3 are stepped over and never projected — and no restart 
 - **A filter must filter.** `--project` once forced its target onto every session, so
   `import --all --project X` swept an entire disk into X. Flags that name a thing narrow the
   set; redirecting is a separate, explicit flag.
+- **A session owns its stream while something holds it.** Re-importing into a live stream gave
+  one aggregate two creation events. But a thread deleted in T3 holds nothing, and refusing
+  there made an imported conversation unrecoverable — `--reclaim` clears the spent stream first.
 - **A session owns its stream for good.** Thread ids are derived from session ids, so
   re-importing after an undo appended a second `thread.created` to a live stream. `EventLog`
   now refuses to recreate an aggregate that has events.

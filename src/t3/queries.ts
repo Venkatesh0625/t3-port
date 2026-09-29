@@ -85,6 +85,40 @@ export function importedSessionIds(db: Database, provider: Provider): Set<string
   return new Set(rows.map((r) => r.stream_id.slice(prefix.length)));
 }
 
+/**
+ * Sessions whose imported thread has since been deleted.
+ *
+ * The stream is spent — it holds a whole thread lifecycle — but nothing live depends on it, so
+ * the conversation can be brought back by clearing the stream and importing again. Without this
+ * an imported thread deleted in T3 is unrecoverable: the id stays claimed by a thread that no
+ * longer exists, which is the same mistake as counting a binding whose thread is gone.
+ */
+export function deletedImportSessionIds(db: Database, provider: Provider): Set<string> {
+  const prefix = importedThreadId("", provider.id);
+  const rows = db
+    .query<{ stream_id: string }, [string]>(
+      `SELECT DISTINCT stream_id FROM orchestration_events
+        WHERE aggregate_kind = 'thread'
+          AND stream_id GLOB ?
+          AND event_type = 'thread.deleted'`,
+    )
+    .all(`${prefix}*`);
+  return new Set(rows.map((r) => r.stream_id.slice(prefix.length)));
+}
+
+/** Remove a spent import stream so its session can be imported again. */
+export function purgeStream(db: Database, threadId: string): void {
+  db.run(
+    "DELETE FROM orchestration_command_receipts WHERE command_id IN " +
+      "(SELECT DISTINCT command_id FROM orchestration_events WHERE stream_id = ?)",
+    [threadId],
+  );
+  db.run("DELETE FROM orchestration_events WHERE stream_id = ?", [threadId]);
+  db.run("DELETE FROM provider_session_runtime WHERE thread_id = ?", [threadId]);
+  db.run("DELETE FROM projection_threads WHERE thread_id = ?", [threadId]);
+  db.run("DELETE FROM projection_thread_messages WHERE thread_id = ?", [threadId]);
+}
+
 export interface ImportedThread {
   readonly threadId: string;
   readonly providerId: string;

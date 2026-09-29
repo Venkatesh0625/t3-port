@@ -16,10 +16,12 @@ import {
 } from "../t3/commands.ts";
 import { EventLog } from "../t3/eventlog.ts";
 import {
+  deletedImportSessionIds,
   importedSessionIds,
   nativeSessionIds,
   ownersBySession,
   projects,
+  purgeStream,
   type Owner,
   type Project,
 } from "../t3/queries.ts";
@@ -30,6 +32,7 @@ export type SkipReason =
   | "already-imported"
   | "t3-native"
   | "no-project"
+  | "import-deleted"
   | "other-project"
   | "in-progress"
   | "noise";
@@ -50,6 +53,8 @@ export interface Planned {
   readonly threadId: string;
   /** The transcript must be placed at the project root for the agent to find it there. */
   readonly needsPlacing: boolean;
+  /** A spent stream from an earlier import of this session, cleared before writing. */
+  readonly replaces?: string;
 }
 
 export interface Skipped {
@@ -138,6 +143,8 @@ function targetFor(
 interface Known {
   readonly native: ReadonlySet<string>;
   readonly imported: ReadonlySet<string>;
+  /** Imported once, then deleted in T3: the id is claimed but nothing holds it. */
+  readonly importedThenDeleted: ReadonlySet<string>;
 }
 
 function classify(
@@ -148,7 +155,11 @@ function classify(
 ): SkipReason | null {
   if (!provider.isResumable(session.sessionId)) return "unresumable-session-id";
   if (!hasUserTurn(session)) return "no-user-turn";
-  if (known.imported.has(session.sessionId)) return "already-imported";
+  if (known.imported.has(session.sessionId)) {
+    // A deleted import still owns the stream, but nothing depends on it — reclaiming clears it.
+    const revivable = known.importedThenDeleted.has(session.sessionId);
+    if (!revivable || !options.reclaim) return revivable ? "import-deleted" : "already-imported";
+  }
   // Only a binding says a thread holds this session. Where a session ran used to say it too —
   // anything under T3's worktrees was assumed to be T3's — but running `claude` by hand inside
   // a worktree produces a session T3 never started, and the guess then claimed a conversation
@@ -175,7 +186,11 @@ export function plan(
   const known = (provider: Provider): Known => {
     let entry = cache.get(provider.id);
     if (!entry) {
-      entry = { native: nativeSessionIds(db, provider), imported: importedSessionIds(db, provider) };
+      entry = {
+        native: nativeSessionIds(db, provider),
+        imported: importedSessionIds(db, provider),
+        importedThenDeleted: deletedImportSessionIds(db, provider),
+      };
       cache.set(provider.id, entry);
     }
     return entry;
@@ -208,11 +223,13 @@ export function plan(
       continue;
     }
 
+    const threadId = importedThreadId(session.sessionId, provider.id);
     planned.push({
       session,
       target,
-      threadId: importedThreadId(session.sessionId, provider.id),
+      threadId,
       needsPlacing: provider.locationAddressed && session.cwd !== target.workspaceRoot,
+      ...(known(provider).importedThenDeleted.has(session.sessionId) ? { replaces: threadId } : {}),
     });
   }
   return { planned, skipped };
@@ -282,6 +299,9 @@ export function apply(
       }
 
       const { session, threadId } = item;
+      // Clearing the spent stream first is what lets the id be used again: an aggregate is
+      // created once, and appending a second creation is the corruption this avoids.
+      if (item.replaces) purgeStream(db, item.replaces);
 
       bindSession(db, {
         provider,

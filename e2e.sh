@@ -175,6 +175,19 @@ check "one thread.deleted per thread"   "$(q "select count(*) from orchestration
 run undo >/dev/null 2>&1
 check "a second undo adds nothing"      "$(q "select count(*) from orchestration_events where event_type='thread.deleted' and stream_id glob 'import:*'")" "$LEFT"
 
+head2 "an import deleted in T3 can be brought back"
+DS=$(q "select stream_id from orchestration_events where stream_id glob 'import:claudeAgent:*' and event_type='thread.created' limit 1")
+DSID=${DS#import:claudeAgent:}
+sqlite3 "$SB/t3/userdata/state.sqlite" "insert into orchestration_events
+ (event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,command_id,correlation_id,actor_kind,payload_json,metadata_json)
+ values ('ev-t3-del','thread','$DS',5000,'thread.deleted','2026-09-29T07:00:00.000Z','server:d','server:d','server','{}','{}');"
+check "blocked without --reclaim"   "$(run import "${DSID:0:8}" --dry-run 2>&1 | grep -c 'deleted the thread')" "1"
+run import "${DSID:0:8}" --reclaim >/dev/null 2>&1
+check "reclaimed"                   "$(q "select count(*) from orchestration_events where stream_id='$DS' and event_type='thread.created'")" "1"
+check "the deletion is gone with it" "$(q "select count(*) from orchestration_events where stream_id='$DS' and event_type='thread.deleted'")" "0"
+check "one lifecycle, not two"      "$(q "select count(*) from orchestration_events where stream_id='$DS' and event_type='thread.settled'")" "1"
+check "no orphan receipts"          "$(q "select count(*) from orchestration_command_receipts r where r.aggregate_id='$DS' and not exists (select 1 from orchestration_events e where e.command_id=r.command_id)")" "0"
+
 head2 "guards"
 cp ~/.t3/userdata/server-runtime.json "$SB/t3/userdata/" 2>/dev/null
 runs_in import >/dev/null 2>&1; check "refuses while T3 runs" "$?" "1"

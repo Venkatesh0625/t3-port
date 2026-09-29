@@ -12,6 +12,7 @@ const SKIP_LABEL: Record<SkipReason, string> = {
   "already-imported": "already imported",
   "t3-native": "started by T3",
   "no-project": "no project covers its directory",
+  "import-deleted": "an earlier import of it was deleted in T3 (--reclaim brings it back)",
   "other-project": "ran outside the named project",
   "in-progress": "still running (--include-live to import anyway)",
   noise: "a command or one-liner (--include-noise to import anyway)",
@@ -25,6 +26,8 @@ const SKIP_SENTENCE: Record<SkipReason, string> = {
   "t3-native":
     "T3 started this session itself, so a thread for it already exists — `--reclaim` imports it anyway",
   "no-project": "no T3 project covers the directory it ran in — `--create-project` makes one",
+  "import-deleted":
+    "you imported it before and deleted the thread — `--reclaim` clears that and imports it again",
   "other-project": "it ran outside the project named by `--project`",
   "in-progress": "it is still being written to — `--include-live` imports it as it stands",
   noise: "it is a command record rather than a conversation — `--include-noise` imports it anyway",
