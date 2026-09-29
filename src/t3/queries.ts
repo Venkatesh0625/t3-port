@@ -123,3 +123,46 @@ export function liveImportedThreads(db: Database): ImportedThread[] {
     };
   });
 }
+
+export interface Owner {
+  readonly threadId: string;
+  readonly title: string;
+}
+
+/**
+ * The thread that already holds each session, whether T3 opened it or an import brought it in.
+ *
+ * "Skipped: started by T3" answers the wrong question. The conversation is not missing; it is
+ * somewhere, and saying where turns a refusal into a direction.
+ */
+export function ownersBySession(db: Database): Map<string, Owner> {
+  const owners = new Map<string, Owner>();
+  for (const row of db
+    .query<
+      { thread_id: string; title: string | null; resume_cursor_json: string | null },
+      []
+    >(
+      // The title comes from the projection when there is one and from the creation event
+      // otherwise: a thread imported since T3 last started has no projection row yet, and
+      // answering with a raw thread id tells the reader nothing.
+      `SELECT r.thread_id,
+              COALESCE(t.title, json_extract(e.payload_json, '$.title')) AS title,
+              r.resume_cursor_json
+         FROM provider_session_runtime r
+         LEFT JOIN projection_threads t ON t.thread_id = r.thread_id AND t.deleted_at IS NULL
+         LEFT JOIN orchestration_events e
+           ON e.stream_id = r.thread_id AND e.event_type = 'thread.created'
+        WHERE r.resume_cursor_json IS NOT NULL`,
+    )
+    .all()) {
+    const cursor = asObject(row.resume_cursor_json);
+    for (const provider of PROVIDERS) {
+      const sessionId = provider.sessionIdFromCursor(cursor);
+      if (sessionId) {
+        owners.set(sessionId, { threadId: row.thread_id, title: row.title ?? row.thread_id });
+        break;
+      }
+    }
+  }
+  return owners;
+}

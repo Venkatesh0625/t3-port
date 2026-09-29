@@ -21,7 +21,7 @@ const SKIP_LABEL: Record<SkipReason, string> = {
 const SKIP_SENTENCE: Record<SkipReason, string> = {
   "no-user-turn": "it has no user message, so there is no conversation to carry over",
   "unresumable-session-id": "its id is not one T3 can resume, so the thread could not continue",
-  "already-imported": "T3 already has it — `t3-port runs` shows which import it came in on",
+  "already-imported": "T3 already has it",
   "t3-native": "T3 started this session itself, so a thread for it already exists",
   "no-project": "no T3 project covers the directory it ran in — `--create-project` makes one",
   "other-project": "it ran outside the project named by `--project`",
@@ -96,8 +96,19 @@ export function sessionLine(
 export function skipReasons(plan: Plan): string {
   const id = abbreviate(plan.skipped.map((s) => s.session.sessionId)).of;
   return plan.skipped
-    .map((s) => `  ${color.dim(id(s.session.sessionId))}  ${s.session.title.slice(0, 40)}`
-      + `\n    ${SKIP_SENTENCE[s.reason]}`)
+    .map((s) => {
+      const lines = [
+        `  ${color.dim(id(s.session.sessionId))}  ${s.session.title.slice(0, 40)}`,
+        `    ${SKIP_SENTENCE[s.reason]}`,
+      ];
+      // Where the conversation actually is beats any further explanation of why it is not here —
+      // unless the thread carries the same title, where saying so twice tells nobody anything.
+      if (s.owner && s.owner.title.trim() !== s.session.title.trim()) {
+        lines.push(`    it is in T3 as ${color.cyan(s.owner.title.slice(0, 48))}`);
+      }
+      if (s.suggestion) lines.push(`    probably ${s.suggestion} — confirm with --project`);
+      return lines.join("\n");
+    })
     .join("\n");
 }
 

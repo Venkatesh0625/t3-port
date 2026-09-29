@@ -15,7 +15,14 @@ import {
   threadUnsettle,
 } from "../t3/commands.ts";
 import { EventLog } from "../t3/eventlog.ts";
-import { importedSessionIds, nativeSessionIds, projects, type Project } from "../t3/queries.ts";
+import {
+  importedSessionIds,
+  nativeSessionIds,
+  ownersBySession,
+  projects,
+  type Owner,
+  type Project,
+} from "../t3/queries.ts";
 
 export type SkipReason =
   | "no-user-turn"
@@ -50,6 +57,8 @@ export interface Skipped {
   readonly reason: SkipReason;
   /** A project that probably owns this session, when we can only guess. */
   readonly suggestion?: string;
+  /** The thread that already holds this conversation, when one does. */
+  readonly owner?: Owner;
 }
 
 export interface Plan {
@@ -149,6 +158,7 @@ export function plan(
   worktrees: string,
 ): Plan {
   const all = projects(db);
+  const owners = ownersBySession(db);
   // Each provider has its own id space and cursor shape, so look them up separately.
   const cache = new Map<string, Known>();
   const known = (provider: Provider): Known => {
@@ -172,7 +182,8 @@ export function plan(
 
     const reason = classify(session, provider, known(provider), worktrees, options);
     if (reason) {
-      skipped.push({ session, reason });
+      const owner = owners.get(session.sessionId);
+      skipped.push(owner ? { session, reason, owner } : { session, reason });
       continue;
     }
 
