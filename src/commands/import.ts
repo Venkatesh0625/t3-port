@@ -1,5 +1,5 @@
 import { loadConfig } from "../config.ts";
-import { requireScope, type Args } from "../cli/args.ts";
+import { optionalScope, requireScope, type Args } from "../cli/args.ts";
 import { collectAll, collectRefs } from "../cli/sessions.ts";
 import { planSummary } from "../cli/report.ts";
 import { apply, plan } from "../ops/import.ts";
@@ -7,7 +7,8 @@ import { backup, open } from "../t3/open.ts";
 
 export async function runImport(args: Args): Promise<number> {
   const config = loadConfig();
-  const scope = requireScope(args);
+  // A named session bounds the work by itself; --path is what bounds an open-ended scan.
+  const scope = args.refs.length === 0 ? requireScope(args) : optionalScope(args);
   const dryRun = args.flags["dry-run"] === true;
   const dropGenerated = args.flags["drop-generated"] === true;
 

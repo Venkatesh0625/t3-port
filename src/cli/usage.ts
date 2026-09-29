@@ -5,14 +5,18 @@ export const USAGE = `t3-port — move conversation history into T3 Code
   t3-port doctor                    check this tool against the installed T3 Code
   t3-port list --path <dir>         sessions from a checkout, with their status in T3
   t3-port import --path <dir>       import a checkout's sessions as T3 threads
+  t3-port import <ref...>           import named sessions; no --path needed
   t3-port prune --path <dir>        find transcript copies nothing can reach
   t3-port runs                      import runs, newest first
   t3-port undo [run]                undo the newest import, or a named run
 
-Required for list and import
-  --path <dir>           the checkout to work on, including the worktrees made from it.
-                         Scoping is mandatory: answering a question about one repository
-                         should not mean reading every transcript on the machine.
+Scope
+  --path <dir>           a checkout — with its subdirectories and every worktree made from it —
+                         or a single worktree, which covers only itself. Required for list, and
+                         for import unless sessions are named: answering a question about one
+                         repository should not mean reading every transcript on the machine.
+                         A named session needs no scope, and one it did not run in will not
+                         reject it.
 
 Providers (all unless named)
 ${PROVIDERS.map((p) => `  --${p.label.padEnd(18)} ${p.id}`).join("\n")}

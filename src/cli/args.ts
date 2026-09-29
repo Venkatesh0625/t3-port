@@ -58,10 +58,17 @@ export function parse(argv: readonly string[]): Args {
  * question about one repository — and because an unscoped command is what turned one mistaken
  * flag into 209 threads in the wrong project.
  */
-export function requireScope(args: Args): Scope {
+/** The scope a command was given, if any. */
+export function optionalScope(args: Args): Scope | undefined {
   const path = args.flags.path;
-  if (typeof path !== "string" || path.length === 0) {
+  if (typeof path !== "string" || path.length === 0) return undefined;
+  return makeScope(resolve(path.replace(/^~/, process.env.HOME ?? "~")));
+}
+
+export function requireScope(args: Args): Scope {
+  const scope = optionalScope(args);
+  if (!scope) {
     throw new PortError("--path <dir> is required: name the checkout to work on, e.g. --path .");
   }
-  return makeScope(resolve(path.replace(/^~/, process.env.HOME ?? "~")));
+  return scope;
 }

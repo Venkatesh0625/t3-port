@@ -36,8 +36,10 @@ export async function collectAll(
 /**
  * Resolve user-supplied references.
  *
- * A reference does not say which agent wrote it, so each provider is asked in turn and the
- * first that recognises it wins. Naming a provider explicitly narrows the search.
+ * A reference does not say which agent wrote it, so every provider is asked and an unambiguous
+ * match wins. A scope disambiguates when more than one agent claims the same reference; it does
+ * not reject, because naming a session is already as specific as an instruction gets and being
+ * told it is "not in" the directory it plainly ran in helps nobody.
  */
 export interface Collected {
   readonly sessions: readonly Session[];
@@ -52,25 +54,31 @@ export async function collectRefs(
 ): Promise<Session[]> {
   const sessions: Session[] = [];
   for (const ref of refs) {
-    let found: Session | null = null;
+    const matches: Session[] = [];
     const failures: string[] = [];
     for (const provider of providers) {
       try {
-        const session = await provider.read(config, provider.resolve(config, ref), options);
-        // An id is abbreviated against the scope it was printed for, so resolve it there too —
-        // otherwise a listing can print a prefix that is unique on screen and ambiguous here.
-        if (scope && !inScope(session.cwd, scope)) {
-          failures.push(`'${ref}' is not in ${scope.root}`);
-          continue;
-        }
-        found = session;
-        break;
+        matches.push(await provider.read(config, provider.resolve(config, ref), options));
       } catch (error) {
         failures.push(error instanceof Error ? error.message : String(error));
       }
     }
-    if (!found) throw new PortError(failures.join("; "));
-    sessions.push(found);
+
+    if (matches.length === 0) {
+      // Report only what a provider said about a reference it recognised the shape of; every
+      // other provider saying "no match" is noise around the one message that matters.
+      const said = failures.filter((message) => !/^no \w+/i.test(message));
+      throw new PortError(said.length > 0 ? said.join("; ") : `no session matches '${ref}'`);
+    }
+
+    const preferred = scope ? matches.filter((session) => inScope(session.cwd, scope)) : [];
+    const chosen = preferred.length === 1 ? preferred[0]! : matches[0]!;
+    if (matches.length > 1 && preferred.length !== 1) {
+      throw new PortError(
+        `'${ref}' matches ${matches.length} sessions across agents; name one with --claude or --codex`,
+      );
+    }
+    sessions.push(chosen);
   }
   return sessions;
 }

@@ -33,7 +33,7 @@ t3-port prune --path ~/code/web-app     # transcript copies nothing can reach (-
 t3-port list web-app deploy             # filter by word: agent, id, project, directory, title
 t3-port list --sort project             # group by project
 t3-port import --codex --drop-generated # one provider
-t3-port import 347cd91a                 # one session, by id prefix
+t3-port import 347cd91a                 # one session by id; no --path needed
 ```
 
 The project column reads `manager/repo/leaf` — `superset/app/few-column`, `t3/app/t3code-e204`,

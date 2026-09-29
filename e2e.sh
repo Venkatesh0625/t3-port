@@ -61,6 +61,13 @@ check "--include-live imports it" "$(runs_in import --claude --include-live --dr
 touch -t 202601010000 "$LIVE"
 check "and not once it is quiet" "$(runs_in import --claude --dry-run 2>/dev/null | grep -c 'still running')" "0"
 
+head2 "naming a session is enough on its own"
+REF=$(runs_in list --claude --include-noise 2>/dev/null | sed -n '4p' | awk '{print $3}')
+check "no --path needed for a named session" "$(run import "$REF" --dry-run 2>&1 | grep -c 'to import')" "1"
+check "a scope it is not in does not reject it" "$(run import --path "$HOME" "$REF" --dry-run 2>&1 | grep -c 'to import')" "1"
+check "--path is still required without one" "$(run import --dry-run 2>&1 | grep -c 'path <dir> is required')" "1"
+check "an unmatched reference says one thing" "$(run import zzzzzzzz --dry-run 2>&1 | grep -c 'no session matches')" "1"
+
 head2 "import --dry-run writes nothing"
 BEFORE=$(q "select count(*) from orchestration_events")
 runs_in import --dry-run >/dev/null 2>&1
