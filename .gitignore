@@ -3,4 +3,6 @@ dist/
 *.bak
 
 *.bun-build
-*.bun-build
+
+# Local notes, not for the repo
+.local/
