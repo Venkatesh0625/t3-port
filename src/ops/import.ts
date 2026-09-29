@@ -6,7 +6,14 @@ import { hasUserTurn, type Session } from "../session.ts";
 import { isNoise } from "../noise.ts";
 import { nowIso } from "../time.ts";
 import { enclosing, nameOf, suggest, under } from "./locate.ts";
-import { bindSession, importedThreadId, projectCreate, threadCreate, threadHistoryImport } from "../t3/commands.ts";
+import {
+  bindSession,
+  importedThreadId,
+  projectCreate,
+  threadCreate,
+  threadHistoryImport,
+  threadUnsettle,
+} from "../t3/commands.ts";
 import { EventLog } from "../t3/eventlog.ts";
 import { importedSessionIds, nativeSessionIds, projects, type Project } from "../t3/queries.ts";
 
@@ -213,7 +220,18 @@ export interface Imported {
  * Order matters: the resume cursor goes in before the thread's events, so a thread is never
  * visible without the binding that lets it continue its session.
  */
-export function apply(db: Database, config: Config, plan: Plan, now = nowIso()): ImportOutcome {
+export interface ApplyOptions {
+  /** Leave imported threads settled, the way T3's own first-run import does. */
+  readonly settled?: boolean;
+}
+
+export function apply(
+  db: Database,
+  config: Config,
+  plan: Plan,
+  options: ApplyOptions = {},
+  now = nowIso(),
+): ImportOutcome {
   const log = new EventLog(db);
   const created = new Map<string, Project>();
   const results: Pending[] = [];
@@ -269,6 +287,9 @@ export function apply(db: Database, config: Config, plan: Plan, now = nowIso()):
         }),
       );
       log.append(threadHistoryImport(threadId, session.turns));
+      // The history import settles the thread; unless asked otherwise, bring it back so it
+      // appears where someone continuing the conversation would look for it.
+      if (!options.settled) log.append(threadUnsettle(threadId, now));
 
       results.push({
         threadId,

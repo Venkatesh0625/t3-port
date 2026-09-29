@@ -38,6 +38,7 @@ Import
   --create-project       create a project when none covers the session
   --include-live         import sessions that still look like they are running
   --include-noise        import command records and one-line sessions too
+  --settled              leave imported threads settled, out of the active list
   --drop-generated       drop preamble a provider wrote as user turns (Codex AGENTS.md,
                          <environment_context>); off by default so no real user text is removed
 

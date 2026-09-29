@@ -100,6 +100,31 @@ export function threadHistoryImport(threadId: string, messages: readonly ImportM
   return { aggregateKind: "thread", streamId: threadId, events };
 }
 
+/**
+ * decider.ts "thread.unsettle" — bring an imported thread into the active list.
+ *
+ * A history import always settles: the decider emits thread.settled after the messages, dated
+ * to the newest one, because T3 treats imported conversations as history. That is right for a
+ * bulk first-run import and wrong for someone bringing a conversation across to carry on with,
+ * which lands it in a list they are not looking at.
+ *
+ * `reason: "user"` sets settledOverride to "active" rather than only clearing the timestamp, so
+ * auto-settle does not quietly put it back (ProjectionPipeline.ts:697).
+ */
+export function threadUnsettle(threadId: string, at: string): Command {
+  return {
+    aggregateKind: "thread",
+    streamId: threadId,
+    events: [
+      {
+        type: "thread.unsettled",
+        occurredAt: at,
+        payload: { threadId, reason: "user", updatedAt: at },
+      },
+    ],
+  };
+}
+
 /** decider.ts "thread.delete" */
 export function threadDelete(threadId: string, at: string): Command {
   return {

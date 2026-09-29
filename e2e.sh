@@ -89,6 +89,12 @@ check "cursors have NO resume key" \
 check "cursor threadId is the session id" \
   "$(q "select count(*) from provider_session_runtime where thread_id glob 'import:codex:*' and json_extract(resume_cursor_json,'\$.threadId') <> replace(thread_id,'import:codex:','')")" "0"
 
+head2 "imported threads land active"
+check "one unsettle per imported thread" \
+  "$(q "select count(*) from orchestration_events where event_type='thread.unsettled' and stream_id glob 'import:*'")" "$((CL+CX))"
+check "each is pinned active, not merely unsettled" \
+  "$(q "select count(*) from orchestration_events where event_type='thread.unsettled' and stream_id glob 'import:*' and json_extract(payload_json,'\$.reason') <> 'user'")" "0"
+
 head2 "event log integrity"
 check "no stream_version gaps or dupes" \
   "$(q "select count(*) from (select stream_id, min(stream_version) mn, max(stream_version) mx, count(*) n, count(distinct stream_version) d from orchestration_events where stream_id glob 'import:*' group by stream_id) where mn<>0 or mx<>n-1 or d<>n")" "0"

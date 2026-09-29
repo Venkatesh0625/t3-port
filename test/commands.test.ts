@@ -1,5 +1,11 @@
 import { expect, test, describe } from "bun:test";
-import { importedMessageId, importedThreadId, threadCreate, threadHistoryImport } from "../src/t3/commands.ts";
+import {
+  importedMessageId,
+  importedThreadId,
+  threadCreate,
+  threadHistoryImport,
+  threadUnsettle,
+} from "../src/t3/commands.ts";
 import { claude } from "../src/providers/claude.ts";
 import { codex } from "../src/providers/codex.ts";
 import { latest } from "../src/time.ts";
@@ -94,4 +100,22 @@ test("latest compares ISO timestamps lexically", () => {
   expect(latest(["2026-01-02T00:00:00.000Z", "2026-01-10T00:00:00.000Z"], "2026-01-01T00:00:00.000Z")).toBe(
     "2026-01-10T00:00:00.000Z",
   );
+});
+
+describe("imported threads are brought into the active list", () => {
+  const command = threadUnsettle("import:claudeAgent:s", "2026-09-01T00:00:00.000Z");
+
+  test("one thread.unsettled, the way decider.ts thread.unsettle writes it", () => {
+    expect(command.events.map((e) => e.type)).toEqual(["thread.unsettled"]);
+  });
+
+  test('reason is "user", which pins it active instead of only clearing the timestamp', () => {
+    // ProjectionPipeline.ts:697 — "activity" leaves settledOverride null and auto-settle
+    // can put the thread straight back.
+    expect(command.events[0]!.payload).toEqual({
+      threadId: "import:claudeAgent:s",
+      reason: "user",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+  });
 });
