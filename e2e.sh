@@ -115,6 +115,14 @@ check "codex re-import plans nothing"  "$(runs_in import --codex --drop-generate
 
 head2 "runs"
 check "two imports are two runs" "$(run runs 2>/dev/null | grep -cE '^  [0-9a-f]{8}  ')" "2"
+# Once T3 resumes an imported thread it writes to that stream under its own correlation id.
+S=$(q "select stream_id from orchestration_events where stream_id glob 'import:*' limit 1")
+sqlite3 "$SB/t3/userdata/state.sqlite" "insert into orchestration_events
+ (event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,command_id,correlation_id,actor_kind,payload_json,metadata_json)
+ values ('ev-t3-touch','thread','$S',9999,'thread.session-set','2026-09-29T06:00:00.000Z','server:x','server:x','server','{}','{}');"
+check "T3 touching an import is not a run" "$(run runs 2>/dev/null | grep -c 'server:x')" "0"
+check "the real runs survive it" "$(run runs 2>/dev/null | grep -cE '^  [0-9a-f]{8}  ')" "2"
+sqlite3 "$SB/t3/userdata/state.sqlite" "delete from orchestration_events where event_id='ev-t3-touch';"
 
 head2 "undo pops an unread run whole"
 EV=$(q "select count(*) from orchestration_events")

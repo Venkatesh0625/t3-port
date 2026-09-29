@@ -60,8 +60,14 @@ export function runs(db: Database): Run[] {
                 THEN e.stream_id END) AS live
          FROM orchestration_events e
         WHERE e.correlation_id IN (
+                -- Anchored on the creation event, not on any event touching an import stream.
+                -- Once T3 resumes an imported thread it writes to that stream under its own
+                -- correlation id, which the looser test turned into a run of its own: a row
+                -- named after a T3 command, holding no threads, offering to be undone.
                 SELECT correlation_id FROM orchestration_events
-                 WHERE stream_id GLOB 'import:*' AND correlation_id IS NOT NULL
+                 WHERE stream_id GLOB 'import:*'
+                   AND event_type = 'thread.created'
+                   AND correlation_id IS NOT NULL
               )
         GROUP BY e.correlation_id
         ORDER BY MAX(e.sequence) DESC`,
