@@ -2,7 +2,7 @@
 # End-to-end test against a throwaway copy of the live state. Writes nothing outside $SB.
 set -uo pipefail
 
-SB=/tmp/t3-port-e2e
+SB=/tmp/t3p-e2e
 CLI="bun run $(cd "$(dirname "$0")" && pwd)/src/main.ts"
 PASS=0; FAIL=0
 
@@ -20,7 +20,7 @@ runs_in() { run "$@" --path "$SCOPE"; }
 head2 "Building sandbox from live state"
 rm -rf "$SB"; mkdir -p "$SB/t3/userdata" "$SB/claude" "$SB/codex"
 # Start from a state with no import history, so counts mean what they say.
-BASE=$(ls -t ~/.t3/userdata/state.sqlite.t3-port-*.bak 2>/dev/null | tail -1)
+BASE=$(ls -t ~/.t3/userdata/state.sqlite.{t3-port,t3p}-*.bak 2>/dev/null | tail -1)
 BASE=${BASE:-~/.t3/userdata/state.sqlite}
 sqlite3 -readonly "$BASE" "VACUUM INTO '$SB/t3/userdata/state.sqlite'"
 echo "  base: $(basename "$BASE")"

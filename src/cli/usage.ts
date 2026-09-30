@@ -1,14 +1,14 @@
 import { PROVIDERS } from "../providers/index.ts";
 
-export const USAGE = `t3-port — move conversation history into T3 Code
+export const USAGE = `t3p — move conversation history into T3 Code
 
-  t3-port doctor                    check this tool against the installed T3 Code
-  t3-port list --path <dir>         sessions from a checkout, with their status in T3
-  t3-port import --path <dir>       import a checkout's sessions as T3 threads
-  t3-port import <ref...>           import named sessions; no --path needed
-  t3-port prune --path <dir>        find transcript copies nothing can reach
-  t3-port runs                      import runs, newest first
-  t3-port undo [run]                undo the newest import, or a named run
+  t3p doctor                        check this tool against the installed T3 Code
+  t3p list --path <dir>             sessions from a checkout, with their status in T3
+  t3p import --path <dir>           import a checkout's sessions as T3 threads
+  t3p import <ref...>               import named sessions; no --path needed
+  t3p prune --path <dir>            find transcript copies nothing can reach
+  t3p runs                          import runs, newest first
+  t3p undo [run]                    undo the newest import, or a named run
 
 Scope
   --path <dir>           a checkout — with its subdirectories and every worktree made from it —

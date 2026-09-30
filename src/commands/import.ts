@@ -70,6 +70,6 @@ export async function runImport(args: Args): Promise<number> {
   const done = apply(db, config, result, { settled: args.flags.settled === true });
   db.close();
   console.log(`imported ${done.threads.length} thread(s) as run ${done.runId.slice(0, 8)}.`);
-  console.log(`Start T3 Code to see them, or "t3-port undo" to take them back.`);
+  console.log(`Start T3 Code to see them, or "t3p undo" to take them back.`);
   return 0;
 }

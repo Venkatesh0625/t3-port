@@ -60,7 +60,7 @@ function stamp(now: Date): string {
  * would miss everything still in the -wal.
  */
 export function backup(db: Database, dbPath: string, now = new Date()): string {
-  const dest = join(dirname(dbPath), `${basename(dbPath)}.t3-port-${stamp(now)}.bak`);
+  const dest = join(dirname(dbPath), `${basename(dbPath)}.t3p-${stamp(now)}.bak`);
   db.run(`VACUUM INTO ${escapeLiteral(dest)}`);
   return dest;
 }

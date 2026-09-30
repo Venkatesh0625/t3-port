@@ -27,7 +27,7 @@ export function listRuns(): number {
         `${String(run.threads).padStart(4)} thread(s)  ${state}`,
     );
   }
-  console.log(`\nUndo the newest with "t3-port undo", or a specific one with "t3-port undo <id>".`);
+  console.log(`\nUndo the newest with "t3p undo", or a specific one with "t3p undo <id>".`);
   db.close();
   return 0;
 }

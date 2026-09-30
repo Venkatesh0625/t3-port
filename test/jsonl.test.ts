@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { records } from "../src/jsonl.ts";
 
 const write = (lines: string): string => {
-  const path = join(mkdtempSync(join(tmpdir(), "t3port-")), "t.jsonl");
+  const path = join(mkdtempSync(join(tmpdir(), "t3p-")), "t.jsonl");
   writeFileSync(path, lines);
   return path;
 };

@@ -10,30 +10,30 @@ so it will not run under Node.
 
 ```sh
 bun install
-bun link                       # puts `t3-port` on your PATH
-bun run build                  # or a standalone binary at dist/t3-port
+bun link                       # puts `t3p` on your PATH (`t3-port` still works)
+bun run build                  # or a standalone binary at dist/t3p
 ```
 
 ## Use
 
 ```sh
-t3-port doctor                 # is this tool safe against your installed T3?
-t3-port list                   # sessions on disk, marked t3 / imported / -
-t3-port import --dry-run       # plan; no references means every importable session
-t3-port import                 # write (quit T3 Code first)
-t3-port runs                   # import runs, newest first
-t3-port undo                   # take the newest import back
+t3p doctor                     # is this tool safe against your installed T3?
+t3p list                       # sessions on disk, marked t3 / imported / -
+t3p import --dry-run           # plan; no references means every importable session
+t3p import                     # write (quit T3 Code first)
+t3p runs                       # import runs, newest first
+t3p undo                       # take the newest import back
 ```
 
 Narrow any of it:
 
 ```sh
-t3-port list --path ~/code/web-app      # a checkout and the worktrees made from it
-t3-port prune --path ~/code/web-app     # transcript copies nothing can reach (--delete to remove)
-t3-port list web-app deploy             # filter by word: agent, id, project, directory, title
-t3-port list --sort project             # group by project
-t3-port import --codex --drop-generated # one provider
-t3-port import 347cd91a                 # one session by id; no --path needed
+t3p list --path ~/code/web-app          # a checkout and the worktrees made from it
+t3p prune --path ~/code/web-app         # transcript copies nothing can reach (--delete to remove)
+t3p list web-app deploy                 # filter by word: agent, id, project, directory, title
+t3p list --sort project                 # group by project
+t3p import --codex --drop-generated # one provider
+t3p import 347cd91a                     # one session by id; no --path needed
 ```
 
 The project column reads `manager/repo/leaf` — `superset/app/few-column`, `t3/app/t3code-e204`,
@@ -111,7 +111,7 @@ bun test      # unit tests
 
 `e2e.sh` builds a sandbox from the most recent backup plus copies of both provider homes, runs
 every command for both providers, and asserts on the resulting event log. It writes nothing
-outside `/tmp/t3-port-e2e`.
+outside `/tmp/t3p-e2e`.
 
 ## Licence
 
