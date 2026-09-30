@@ -96,8 +96,11 @@ export interface PlanOptions {
   readonly createProject?: boolean;
   /** Import sessions that still look like they are running. */
   readonly includeLive?: boolean;
-  /** Import command records and one-line sessions too. */
-  readonly includeNoise?: boolean;
+  /**
+   * The sessions were named one by one, so none is dropped as noise: naming a session is
+   * already as specific as an instruction gets.
+   */
+  readonly named?: boolean;
   /**
    * Import a session even though a T3 thread already resumes it.
    *
@@ -165,7 +168,7 @@ function classify(
   // a worktree produces a session T3 never started, and the guess then claimed a conversation
   // no thread held. Bindings answer the question the guess was approximating.
   if (!options.reclaim && known.native.has(session.sessionId)) return "t3-native";
-  if (!options.includeNoise && isNoise(session)) return "noise";
+  if (!options.named && isNoise(session)) return "noise";
   if (!options.includeLive) {
     const age = (options.now ?? Date.now()) - session.stat.mtimeMs;
     if (age >= 0 && age < LIVE_WINDOW_MS) return "in-progress";

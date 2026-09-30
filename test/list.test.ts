@@ -122,60 +122,101 @@ describe("sorting", () => {
 });
 
 describe("session id abbreviation", () => {
+  // Most cases measure a listing against itself; the regression below is the one that doesn't.
+  const width = (ids: string[]) => abbreviationWidth(ids, ids);
+
   test("eight characters when that is enough (Claude's random v4 ids)", () => {
-    expect(
-      abbreviationWidth(["347cd91a-749f-4f92-a41d-4b8e82e158d9", "f023f049-9a13-48d0-af47-520acf1c46a1"]),
-    ).toBe(8);
+    expect(width(["347cd91a-749f-4f92-a41d-4b8e82e158d9", "f023f049-9a13-48d0-af47-520acf1c46a1"])).toBe(8);
   });
 
   test("grows past a shared prefix, to the next whole group", () => {
     // Both start 01a0e776: the first 48 bits of a UUIDv7 are a millisecond timestamp.
     const ids = ["01a0e776-e594-7722-86ec-c75d00d64a29", "01a0e776-ab49-76a3-a96d-da1c67ca38ef"];
-    const width = abbreviationWidth(ids);
-    expect(width).toBe(13);
-    expect(ids.map((id) => id.slice(0, width))).toEqual(["01a0e776-e594", "01a0e776-ab49"]);
+    const w = width(ids);
+    expect(w).toBe(13);
+    expect(ids.map((id) => id.slice(0, w))).toEqual(["01a0e776-e594", "01a0e776-ab49"]);
   });
 
   test("a truncated group is never shown", () => {
-    const width = abbreviationWidth([
+    const w = width([
       "01a0e776-e594-7722-86ec-c75d00d64a29",
       "01a0e776-ab49-76a3-a96d-da1c67ca38ef",
       "01a0e776-ac00-7000-8000-000000000000",
     ]);
-    expect([8, 13, 18, 23, 36]).toContain(width);
+    expect([8, 13, 18, 23, 36]).toContain(w);
   });
 
   test("ids that are not UUIDs still grow one character at a time", () => {
-    expect(abbreviationWidth(["import-aaa", "import-aab"])).toBe(10);
+    expect(width(["import-aaa", "import-aab"])).toBe(10);
   });
 
   test("one width is used for the whole listing, so the column stays aligned", () => {
-    const { width, of } = abbreviate([
+    const ids = [
       "01a0e776-e594-7722-86ec-c75d00d64a29",
       "01a0e776-ab49-76a3-a96d-da1c67ca38ef",
       "347cd91a-749f-4f92-a41d-4b8e82e158d9",
-    ]);
-    expect(of("347cd91a-749f-4f92-a41d-4b8e82e158d9")).toHaveLength(width);
-  });
-
-  test("identical ids cannot be split, so it stops at full length", () => {
-    expect(abbreviationWidth(["aaaaaaaaaa", "aaaaaaaaaa"])).toBe(10);
+    ];
+    const { width: w, of } = abbreviate(ids, ids);
+    expect(of("347cd91a-749f-4f92-a41d-4b8e82e158d9")).toHaveLength(w);
   });
 
   test("an empty listing needs no width", () => {
-    expect(abbreviationWidth([])).toBe(8);
+    expect(width([])).toBe(8);
   });
 });
 
-describe("abbreviation is not derailed by duplicates", () => {
-  test("a repeated id cannot be split, so the width does not blow up for the rest", () => {
-    // Listings deduplicate before this point; the guard keeps a stray duplicate from
-    // forcing every id in the column to its full length.
-    const width = abbreviationWidth([
-      "70abaae3-6bac-4834-abed-04720e8ba949",
-      "70abaae3-6bac-4834-abed-04720e8ba949",
-    ]);
-    expect(width).toBe(36);
+describe("an abbreviation is unique among every session, not the ones shown", () => {
+  // A checkout's only Codex session was listed as 01a0e207, and `import 01a0e207` then refused:
+  // another rollout elsewhere on disk started the same way.
+  const here = "01a0e207-9cba-7af3-89d2-5f376c15070c";
+  const elsewhere = "01a0e207-7034-77f3-bade-083ca2975325";
+
+  test("a session outside the listing still widens the id", () => {
+    const { of } = abbreviate([here], [here, elsewhere]);
+    expect(of(here)).toBe("01a0e207-9cba");
+    expect(elsewhere.startsWith(of(here))).toBe(false);
+  });
+
+  test("sessions that share nothing with the listing cost nothing", () => {
+    expect(abbreviationWidth([here], [here, "f023f049-9a13-48d0-af47-520acf1c46a1"])).toBe(8);
+  });
+
+  test("the same id twice is one session, not a collision", () => {
+    // Claude keeps copies of a transcript under several project directories; resolving
+    // treats them as one session, so they must not force the full id.
+    const id = "70abaae3-6bac-4834-abed-04720e8ba949";
+    expect(abbreviationWidth([id, id], [id, id])).toBe(8);
+  });
+
+  test("an id that prefixes another is shown whole", () => {
+    expect(abbreviationWidth(["import-aa"], ["import-aa", "import-aab"])).toBe(9);
+  });
+});
+
+describe("noise is dropped from a scan, never from a named session", () => {
+  const hi = session({
+    sessionId: "347cd91a-749f-4f92-a41d-4b8e82e158d9",
+    provider: "claudeAgent",
+    cwd: "/repo",
+    turns: [
+      { role: "user", text: "hi", createdAt: "2026-01-01T00:00:00.000Z" },
+      { role: "assistant", text: "Hello!", createdAt: "2026-01-01T00:00:01.000Z" },
+    ],
+  });
+  const reasonFor = (named: boolean) =>
+    plan(
+      { query: () => ({ all: () => [], get: () => undefined }) } as never,
+      [hi],
+      { named, now: 0 },
+      "/worktrees",
+    ).skipped[0]?.reason;
+
+  test("a scan skips it", () => {
+    expect(reasonFor(false)).toBe("noise");
+  });
+
+  test("naming it is enough to import it — there is no flag to add", () => {
+    expect(reasonFor(true)).not.toBe("noise");
   });
 });
 
@@ -190,7 +231,11 @@ describe("sessions that are still running", () => {
       // Long enough not to read as a command record, which is checked before liveness.
       turns: [
         { role: "user", text: "walk me through the retry logic in the worker", createdAt: "2026-01-01T00:00:00.000Z" },
-        { role: "assistant", text: "it retries three times", createdAt: "2026-01-01T00:00:01.000Z" },
+        {
+          role: "assistant",
+          text: "it retries three times with exponential backoff, then parks the job on the dead-letter queue",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
         { role: "user", text: "and what happens after that", createdAt: "2026-01-01T00:00:02.000Z" },
       ],
       stat: { size: 1, mtimeMs, dev: 0, ino: 0 },

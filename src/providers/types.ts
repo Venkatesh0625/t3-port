@@ -26,6 +26,13 @@ export interface Provider {
    * rather than opening them and throwing the results away.
    */
   list(config: Config, scope?: Scope): string[];
+  /**
+   * Every session id `resolve` searches, from filenames alone.
+   *
+   * A printed id is only worth printing if it can be handed back, so an abbreviation has to be
+   * unique among exactly these — not among whatever a listing happened to show.
+   */
+  ids(config: Config): string[];
   /** Resolve a user-supplied reference to a transcript path. */
   resolve(config: Config, ref: string): string;
   read(config: Config, path: string, options: ReadOptions): Promise<Session>;

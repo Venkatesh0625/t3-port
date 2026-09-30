@@ -47,6 +47,8 @@ export const codex: Provider = {
       .sort((a, b) => b.mtime - a.mtime)
       .map((entry) => entry.path),
 
+  ids: (config) => rollouts(config.codexHome).map((path) => sessionIdOf(path)!),
+
   resolve(config, ref) {
     if (ref.endsWith(".jsonl") && existsSync(ref)) return ref;
     const needle = ref.toLowerCase();

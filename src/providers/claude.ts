@@ -53,6 +53,8 @@ export const claude: Provider = {
       .sort((a, b) => b.mtime - a.mtime)
       .map((entry) => entry.path),
 
+  ids: (config) => scan(config.claudeProjects, "*/*.jsonl").map((path) => basename(path).replace(/\.jsonl$/, "")),
+
   resolve(config, ref) {
     if (ref.endsWith(".jsonl") && existsSync(ref)) return ref;
     const hits = scan(config.claudeProjects, `*/${ref}*.jsonl`);

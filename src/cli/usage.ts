@@ -25,7 +25,6 @@ List
   Terms filter by substring across agent, session id, project, directory and title. Every term
   must match, so they narrow: "list codex web-app" is Codex sessions under web-app.
 
-  --include-noise        show command records and one-line sessions
   --sort <field>         recent (default), project, turns, agent or title
   --limit <n>            rows to show; 0 for all. Defaults to 40 in a terminal, all when piped
   --offset <n>           skip this many rows
@@ -37,7 +36,6 @@ Import
   --force-project        with --project, redirect every session there regardless of where it ran
   --create-project       create a project when none covers the session
   --include-live         import sessions that still look like they are running
-  --include-noise        import command records and one-line sessions too
   --settled              leave imported threads settled, out of the active list
   --reclaim              import even though a T3 thread already resumes the session, as when
                          that thread was deleted or archived and the conversation is wanted back

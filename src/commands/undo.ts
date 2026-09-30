@@ -1,6 +1,7 @@
 import { loadConfig } from "../config.ts";
 import type { Args } from "../cli/args.ts";
 import { threadList } from "../cli/report.ts";
+import { referableIds } from "../cli/sessions.ts";
 import { PortError } from "../errors.ts";
 import { threadsOf, undoRun } from "../ops/undo.ts";
 import { backup, open } from "../t3/open.ts";
@@ -33,7 +34,7 @@ export function runUndo(args: Args): number {
 
   const threads = threadsOf(db, run);
   console.log(`run ${run.id.slice(0, 8)}  ${run.at}  ${run.threads} thread(s)`);
-  console.log(threadList(threads));
+  console.log(threadList(threads, referableIds(config)));
   console.log(
     run.projected
       ? `\nT3 has already read this run, so its threads will be deleted the way T3 deletes a\n` +

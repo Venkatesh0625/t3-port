@@ -1,9 +1,9 @@
 import { loadConfig } from "../config.ts";
 import { requireScope, type Args } from "../cli/args.ts";
-import { collectAll } from "../cli/sessions.ts";
+import { collectAll, referableIds } from "../cli/sessions.ts";
 import { projectWidth, sessionHeader, sessionLine, type Listed } from "../cli/report.ts";
 import { matches } from "../cli/filter.ts";
-import { isNoise } from "../noise.ts";
+import { isNoise, MIN_CONVERSATION } from "../noise.ts";
 import { abbreviate } from "../cli/abbrev.ts";
 import { parseSort, sortRows } from "../cli/sort.ts";
 import { PortError } from "../errors.ts";
@@ -48,8 +48,7 @@ export async function list(args: Args): Promise<number> {
   });
   db.close();
 
-  const showNoise = args.flags["include-noise"] === true;
-  const signal = showNoise ? rows : rows.filter((row) => !isNoise(row.session));
+  const signal = rows.filter((row) => !isNoise(row.session));
   const hidden = rows.length - signal.length;
 
   const found = sortRows(
@@ -65,10 +64,10 @@ export async function list(args: Args): Promise<number> {
   const page = limit === 0 ? found.slice(offset) : found.slice(offset, offset + limit);
 
   const shown = `${offset + 1}–${offset + page.length}`;
-  // Width comes from every session, not the filtered ones: an id printed here is meant to be
-  // handed back to `import`, which resolves against all of them. Narrowing the input would let
-  // a filter print a prefix that is unique on screen and ambiguous everywhere else.
-  const id = abbreviate(rows.map((r) => r.session.sessionId));
+  // Unique among every session on disk, not the ones in scope: an id printed here is meant to
+  // be handed back to `import`, which resolves against all of them. Measuring against the scope
+  // printed `01a0e207` for a checkout's only Codex session while another elsewhere shared it.
+  const id = abbreviate(page.map((r) => r.session.sessionId), referableIds(config));
   const matching = terms.length > 0 ? ` matching ${terms.map((t) => `"${t}"`).join(" ")}` : "";
   const of = terms.length > 0 ? color.dim(` of ${rows.length}`) : "";
   const countLine =
@@ -80,7 +79,7 @@ export async function list(args: Args): Promise<number> {
     console.log(countLine);
     console.log(
       hidden > 0 && found.length === 0
-          ? `All ${hidden} session(s) here are command records — --include-noise to see them.`
+          ? `All ${hidden} session(s) here are commands or too short to keep.`
           : terms.length > 0
             ? "Nothing matched."
             : "No sessions ran here.",
@@ -96,7 +95,7 @@ export async function list(args: Args): Promise<number> {
   for (const row of page) console.log(sessionLine(row, (s) => labelOf(s.provider), id.of, width));
 
   if (hidden > 0) {
-    console.log(color.dim(`\n${hidden} command and one-liner session(s) hidden — --include-noise to show.`));
+    console.log(color.dim(`\n${hidden} session(s) hidden: only commands, or under ${MIN_CONVERSATION} characters.`));
   }
 
   const remaining = found.length - (offset + page.length);

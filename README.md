@@ -41,8 +41,9 @@ The project column reads `manager/repo/leaf` — `superset/app/few-column`, `t3/
 made a worktree and what it came from are the facts that tell two rows apart, so they sit at the
 front and a long worktree name is shortened instead.
 
-Command records and one-line sessions (`/clear`, `/login`, workspace-naming prompts) are hidden
-from listings and skipped by imports; `--include-noise` keeps them.
+Sessions with nothing to carry over — only commands like `/clear` or `/login`, prompts an agent
+wrote for itself, or under 150 characters of conversation — are hidden from listings and
+skipped when importing a whole checkout. A session named by id is always imported.
 
 `--path` takes either a checkout or a single worktree. A checkout covers its subdirectories and
 every worktree made from it, wherever those are kept; a worktree covers only itself, since

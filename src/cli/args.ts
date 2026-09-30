@@ -17,7 +17,6 @@ const OPTIONS = {
   "force-project": { type: "boolean" },
   "create-project": { type: "boolean" },
   "include-live": { type: "boolean" },
-  "include-noise": { type: "boolean" },
   settled: { type: "boolean" },
   reclaim: { type: "boolean" },
   "drop-generated": { type: "boolean" },

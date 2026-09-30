@@ -1,6 +1,6 @@
 import { loadConfig } from "../config.ts";
 import { optionalScope, requireScope, type Args } from "../cli/args.ts";
-import { collectAll, collectRefs } from "../cli/sessions.ts";
+import { collectAll, collectRefs, referableIds } from "../cli/sessions.ts";
 import { planSummary, skipReasons } from "../cli/report.ts";
 import { color } from "../cli/color.ts";
 import { apply, plan } from "../ops/import.ts";
@@ -28,7 +28,7 @@ export async function runImport(args: Args): Promise<number> {
       forceProject: args.flags["force-project"] === true,
       createProject: args.flags["create-project"] === true,
       includeLive: args.flags["include-live"] === true,
-      includeNoise: args.flags["include-noise"] === true,
+      named: args.refs.length > 0,
       reclaim: args.flags.reclaim === true,
     },
     config.worktrees,
@@ -37,10 +37,10 @@ export async function runImport(args: Args): Promise<number> {
   // Naming sessions is a question about those sessions; scanning a checkout is a question
   // about the checkout, and only that one wants a tally.
   if (args.refs.length > 0 && result.planned.length === 0) {
-    console.log(skipReasons(result));
+    console.log(skipReasons(result, referableIds(config)));
     return 0;
   }
-  console.log(planSummary(result));
+  console.log(planSummary(result, referableIds(config)));
 
   if (args.flags.reclaim === true && result.planned.length > 0) {
     console.log(

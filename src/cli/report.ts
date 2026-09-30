@@ -15,7 +15,7 @@ const SKIP_LABEL: Record<SkipReason, string> = {
   "import-deleted": "an earlier import of it was deleted in T3 (--reclaim brings it back)",
   "other-project": "ran outside the named project",
   "in-progress": "still running (--include-live to import anyway)",
-  noise: "a command or one-liner (--include-noise to import anyway)",
+  noise: "a command or a conversation too short to keep (name it to import anyway)",
 };
 
 /** Said to someone who named this session, who wants a reason rather than a tally. */
@@ -30,7 +30,7 @@ const SKIP_SENTENCE: Record<SkipReason, string> = {
     "you imported it before and deleted the thread — `--reclaim` clears that and imports it again",
   "other-project": "it ran outside the project named by `--project`",
   "in-progress": "it is still being written to — `--include-live` imports it as it stands",
-  noise: "it is a command record rather than a conversation — `--include-noise` imports it anyway",
+  noise: "it is only commands, or too short a conversation to keep",
 };
 
 
@@ -97,8 +97,8 @@ export function sessionLine(
  * Naming a session and being answered with "0 to import, 1 skipped" is a tally where a reason
  * was asked for; the count only earns its place when the plan covers a whole checkout.
  */
-export function skipReasons(plan: Plan): string {
-  const id = abbreviate(plan.skipped.map((s) => s.session.sessionId)).of;
+export function skipReasons(plan: Plan, universe: readonly string[]): string {
+  const id = abbreviate(plan.skipped.map((s) => s.session.sessionId), universe).of;
   return plan.skipped
     .map((s) => {
       const lines = [
@@ -121,11 +121,11 @@ export function skipReasons(plan: Plan): string {
     .join("\n");
 }
 
-export function planSummary(plan: Plan): string {
+export function planSummary(plan: Plan, universe: readonly string[]): string {
   const counts = new Map<SkipReason, number>();
   for (const s of plan.skipped) counts.set(s.reason, (counts.get(s.reason) ?? 0) + 1);
 
-  const id = abbreviate([...plan.planned, ...plan.skipped].map((i) => i.session.sessionId)).of;
+  const id = abbreviate([...plan.planned, ...plan.skipped].map((i) => i.session.sessionId), universe).of;
   const lines = [
     `${color.bold(String(plan.planned.length))} to import, ${plan.skipped.length} skipped`,
   ];
@@ -158,8 +158,8 @@ export function planSummary(plan: Plan): string {
   return lines.join("\n");
 }
 
-export function threadList(threads: readonly ImportedThread[], limit = 15): string {
-  const id = abbreviate(threads.map((t) => t.sessionId ?? t.threadId)).of;
+export function threadList(threads: readonly ImportedThread[], universe: readonly string[], limit = 15): string {
+  const id = abbreviate(threads.map((t) => t.sessionId ?? t.threadId), universe).of;
   const lines = threads
     .slice(0, limit)
     .map((t) => `  ${id(t.sessionId ?? t.threadId)}  ${t.title.slice(0, 60)}`);

@@ -1,8 +1,16 @@
 import type { Config } from "../config.ts";
 import { PortError } from "../errors.ts";
-import type { Provider, ReadOptions } from "../providers/index.ts";
+import { PROVIDERS, type Provider, type ReadOptions } from "../providers/index.ts";
 import type { Session } from "../session.ts";
 import { inScope, type Scope } from "../scope.ts";
+
+/**
+ * Every session id a reference could resolve to, for abbreviating ones that are printed.
+ *
+ * All agents, whatever flags narrowed this command: an id is printed to be typed into a later
+ * one, and `import <ref>` without a flag tries every agent.
+ */
+export const referableIds = (config: Config): string[] => PROVIDERS.flatMap((p) => p.ids(config));
 
 /**
  * One entry per session, newest first.

@@ -39,42 +39,48 @@ head2 "list"
 # Distinct session ids, not files: depth 2 only (deeper files are subagent sidechains), and a
 # transcript can sit in two directories when Claude copies a worktree session to the root.
 CLAUDE_N=$(find "$SB/claude/projects" -mindepth 2 -maxdepth 2 -name '*.jsonl' -exec basename {} .jsonl \; | sort -u | wc -l | tr -d ' ')
-CODEX_N=$(runs_in list --codex --include-noise 2>/dev/null | grep -m1 'session(s) in' | cut -d' ' -f1)
+CODEX_N=$(runs_in list --codex 2>/dev/null | grep -m1 'session(s) in' | cut -d' ' -f1)
 # Piped output is never truncated, so a count here is the real total.
 check "--path is required"        "$(run list 2>&1 | grep -c 'path <dir> is required')" "1"
 check "a scope narrows the listing" "$([ "$(runs_in list 2>/dev/null | grep -m1 'session(s) in' | cut -d' ' -f1)" -lt "$CLAUDE_N" ] && echo yes)" "yes"
 check "both providers appear"     "$(runs_in list 2>/dev/null | grep -cE ' (claude|codex) ' | awk '{print ($1>0)?1:0}')" "1"
-check "--limit caps the page"     "$(runs_in list --codex --include-noise --limit 7 2>/dev/null | grep -c ' codex ')" "7"
-check "--offset skips"            "$(runs_in list --codex --include-noise --limit 2 --offset 1 2>/dev/null | grep -c 'showing 2')" "1"
-check "--limit 0 means all"       "$(runs_in list --codex --include-noise --limit 0 2>/dev/null | grep -c ' codex ')" "$CODEX_N"
-check "noise is hidden by default" "$([ "$(runs_in list --codex 2>/dev/null | grep -m1 'session(s) in' | cut -d' ' -f1)" -lt "$CODEX_N" ] && echo yes)" "yes"
+check "--limit caps the page"     "$(runs_in list --codex --limit 7 2>/dev/null | grep -c ' codex ')" "7"
+check "--offset skips"            "$(runs_in list --codex --limit 2 --offset 1 2>/dev/null | grep -c 'showing 2')" "1"
+check "--limit 0 means all"       "$(runs_in list --codex --limit 0 2>/dev/null | grep -c ' codex ')" "$CODEX_N"
+check "noise is hidden, and says so" "$(runs_in list --codex 2>/dev/null | grep -c 'session(s) hidden')" "1"
+check "there is no flag to show it"  "$(runs_in list --include-noise 2>&1 | grep -ci 'unknown')" "1"
 check "a bad limit is rejected"   "$(runs_in list --limit abc 2>&1 | grep -c 'whole number')" "1"
 check "piped output has no escape codes" "$(runs_in list --codex --limit 3 2>/dev/null | grep -c "\\[3")" "0"
 check "the project column is shown" "$(runs_in list --codex --limit 3 2>/dev/null | grep -c 'project')" "1"
 
 head2 "a session still being written to"
 # Must be inside the scope, or the guard has nothing to hold back.
-LIVE=$(find "$SB/claude/projects/$(printf '%s' "$SCOPE" | tr -c 'A-Za-z0-9' '-')" -maxdepth 1 -name '*.jsonl' -size -16M | head -1)
+# Other sessions in scope may really be running; count relative to them, not to zero.
+live_n() { runs_in import --claude --dry-run 2>/dev/null | awk '/still running/{print $1; f=1} END{if(!f) print 0}'; }
+LIVE_BASE=$(live_n)
+LIVE=$(find "$SB/claude/projects/$(printf '%s' "$SCOPE" | tr -c 'A-Za-z0-9' '-')" -maxdepth 1 -name '*.jsonl' -size -16M -mmin +10 | head -1)
 touch "$LIVE"
-check "is held back"       "$(runs_in import --claude --dry-run 2>/dev/null | grep -c 'still running')" "1"
+check "is held back"       "$(live_n)" "$((LIVE_BASE+1))"
 check "--include-live imports it" "$(runs_in import --claude --include-live --dry-run 2>/dev/null | grep -c 'still running')" "0"
 touch -t 202601010000 "$LIVE"
-check "and not once it is quiet" "$(runs_in import --claude --dry-run 2>/dev/null | grep -c 'still running')" "0"
+check "and not once it is quiet" "$(live_n)" "$LIVE_BASE"
 
 head2 "naming a session is enough on its own"
-REF=$(runs_in list --claude --include-noise 2>/dev/null | sed -n '4p' | awk '{print $3}')
-check "no --path needed for a named session" "$(run import "$REF" --dry-run 2>&1 | grep -c 'to import')" "1"
-check "a scope it is not in does not reject it" "$(run import --path "$HOME" "$REF" --dry-run 2>&1 | grep -c 'to import')" "1"
+# --include-live throughout: the newest session is often the one being worked in right now, and
+# these checks are about naming and scope, not liveness.
+REF=$(runs_in list --claude 2>/dev/null | sed -n '4p' | awk '{print $3}')
+check "no --path needed for a named session" "$(run import "$REF" --include-live --dry-run 2>&1 | grep -c 'to import')" "1"
+check "a scope it is not in does not reject it" "$(run import --path "$HOME" "$REF" --include-live --dry-run 2>&1 | grep -c 'to import')" "1"
 check "--path is still required without one" "$(run import --dry-run 2>&1 | grep -c 'path <dir> is required')" "1"
 check "an unmatched reference says one thing" "$(run import zzzzzzzz --dry-run 2>&1 | grep -c 'no session matches')" "1"
-check "a named session gets a reason, not a tally" "$(run import "$REF" --dry-run 2>&1 | grep -c 'to import')" "1"
+check "a named session gets a reason, not a tally" "$(run import "$REF" --include-live --dry-run 2>&1 | grep -c 'to import')" "1"
 
 head2 "a binding outlives its thread"
 # T3 deletes a thread and leaves provider_session_runtime behind; a session must not stay
 # claimed by a thread that no longer exists.
-BEFORE=$(runs_in list --claude --include-noise 2>/dev/null | grep -c '^t3 ')
+BEFORE=$(runs_in list --claude 2>/dev/null | grep -c '^t3 ')
 # The thread owning a session this listing marks as T3's own.
-SID=$(runs_in list --claude --include-noise 2>/dev/null | awk '$1=="t3"{print $3; exit}')
+SID=$(runs_in list --claude 2>/dev/null | awk '$1=="t3"{print $3; exit}')
 NAT=$(q "select thread_id from provider_session_runtime
           where thread_id not glob 'import:*'
             and json_extract(resume_cursor_json,'\$.resume') like '${SID}%' limit 1")
@@ -82,7 +88,7 @@ if [ -n "$SID" ] && [ -n "$NAT" ]; then
   sqlite3 "$SB/t3/userdata/state.sqlite" "insert into orchestration_events
    (event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,command_id,correlation_id,actor_kind,payload_json,metadata_json)
    values ('ev-del','thread','$NAT',9998,'thread.deleted','2026-09-29T06:00:00.000Z','c','c','client','{}','{}');"
-  AFTER=$(runs_in list --claude --include-noise 2>/dev/null | grep -c '^t3 ')
+  AFTER=$(runs_in list --claude 2>/dev/null | grep -c '^t3 ')
   check "deleting the thread releases its session" "$([ "$AFTER" -lt "$BEFORE" ] && echo yes || echo "$BEFORE->$AFTER")" "yes"
   sqlite3 "$SB/t3/userdata/state.sqlite" "delete from orchestration_events where event_id='ev-del';"
 else
@@ -90,7 +96,7 @@ else
 fi
 
 head2 "reclaiming a session a thread already holds"
-CLAIMED=$(runs_in list --claude --include-noise 2>/dev/null | awk '$1=="t3"{print $3; exit}')
+CLAIMED=$(runs_in list --claude 2>/dev/null | awk '$1=="t3"{print $3; exit}')
 if [ -n "$CLAIMED" ]; then
   check "blocked by default"  "$(run import "$CLAIMED" --dry-run 2>&1 | grep -c 'already exists')" "1"
   check "--reclaim overrides" "$(run import "$CLAIMED" --reclaim --dry-run 2>&1 | grep -c '1 to import')" "1"
